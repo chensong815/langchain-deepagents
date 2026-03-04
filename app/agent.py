@@ -123,7 +123,8 @@ def get_agent():
         model=settings.model_name,
         temperature=settings.temperature,
     )
-    backend = FilesystemBackend(root_dir=settings.project_root)
+    # 使用 virtual_mode 让 "/skills/..."、"/memory/..." 这类路径相对 project_root 解析。
+    backend = FilesystemBackend(root_dir=settings.project_root, virtual_mode=True)
 
     loaded_skills = list_skills(settings.project_root, settings.skill_sources)
     if loaded_skills:

@@ -3,15 +3,38 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 from urllib import error, request
 
 from langchain.tools import tool
 
 
-FIELD_LINEAGE_ENDPOINT = "http://127.0.0.1:8000/api/graph/field-lineage-analysis"
+def _read_env_text(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
+
+
+def _read_env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+FIELD_LINEAGE_ENDPOINT = _read_env_text(
+    "FIELD_LINEAGE_ENDPOINT",
+    "http://123.207.206.62:39000/api/graph/field-lineage-analysis",
+)
 FIELD_LINEAGE_STOP_MESSAGE = "该阶段无目标字段相关血缘"
 DEFAULT_FIELD_LINEAGE_MAX_ROUNDS = 20
+FIELD_LINEAGE_TIMEOUT_SECONDS = _read_env_float("FIELD_LINEAGE_TIMEOUT_SECONDS", 20.0)
 
 
 def _post_json(url: str, payload: dict[str, Any], timeout: float = 20.0) -> dict[str, Any]:
@@ -83,17 +106,34 @@ def search_knowledge_base(query: str) -> str:
 
 @tool
 def query_field_lineage_step(name: str, target_col: str) -> str:
-    """调用知识图谱字段血缘接口，返回单次结果，包含 message 与 should_continue。"""
+    """调用字段血缘接口，返回单轮结果，兼容新版返回结构。"""
     payload = {"name": name, "target_col": target_col}
-    response = _post_json(FIELD_LINEAGE_ENDPOINT, payload)
+    response = _post_json(FIELD_LINEAGE_ENDPOINT, payload, timeout=FIELD_LINEAGE_TIMEOUT_SECONDS)
     if not response.get("ok"):
         return json.dumps(response, ensure_ascii=False)
 
     message = str(response.get("message", "")).strip()
+    business_entities = response.get("business_entities")
+    full_lineage_paths = response.get("full_lineage_paths")
+    count = response.get("count")
+
+    if not isinstance(business_entities, list):
+        business_entities = []
+    if not isinstance(full_lineage_paths, list):
+        full_lineage_paths = []
+    if not isinstance(count, int):
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            count = len(full_lineage_paths)
+
     result = {
         "ok": True,
         "name": str(response.get("name", name)),
         "target_col": str(response.get("target_col", target_col)),
+        "business_entities": business_entities,
+        "count": count,
+        "full_lineage_paths": full_lineage_paths,
         "message": message,
         "should_continue": message != FIELD_LINEAGE_STOP_MESSAGE,
         "stop_message": FIELD_LINEAGE_STOP_MESSAGE,

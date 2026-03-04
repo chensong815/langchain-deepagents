@@ -184,8 +184,7 @@ def route_with_skill_intent(user_message: str) -> tuple[str | None, str | None]:
         "[SKILL_ROUTER_HINT]\n"
         f"{json.dumps(hint_payload, ensure_ascii=False)}\n"
         "[/SKILL_ROUTER_HINT]\n"
-        "优先依据该 skill 的 SKILL.md 执行；若信息不足先追问用户，不要臆造参数。\n"
+        "优先依据该 skill 的 SKILL.md 执行；先尝试从同一会话上下文补全缺失参数，仍不足时再追问用户，不要臆造参数。\n"
         f"用户原始问题：{decision.normalized_query}"
     )
     return augmented, None
-

@@ -8,11 +8,13 @@ path: /skills/base/db-field-lineage/SKILL.md
 
 ## 工作流
 
-1. 接收并确认两个输入：`name`（表名）和 `target_col`（字段名）。
-2. 优先调用工具 `query_field_lineage_until_stop(name, target_col)`。
-3. 从工具返回结果中读取 `messages` 列表，并按顺序返回给 agent。
-4. 若 `stopped=true`，说明已命中停止条件 `message == "该阶段无目标字段相关血缘"`，停止继续查询。
-5. 若 `stopped=false`，说明达到 `max_rounds` 仍未命中停止条件，向 agent 明确说明“已达到最大查询轮次”。
+1. 优先解析两个输入：`name`（表名）和 `target_col`（字段名）。
+2. 若本轮仅提供了其中一个参数（例如“换成字段 xxx”），优先复用同一会话中最近一次字段血缘查询已确认的另一个参数，不要重复追问。
+3. 仅当当前轮次与会话上下文都无法确定 `name` 或 `target_col` 时，才向用户追问缺失参数。
+4. 参数齐全后，优先调用工具 `query_field_lineage_until_stop(name, target_col)`。
+5. 从工具返回结果中读取 `messages` 列表，并按顺序返回给 agent。
+6. 若 `stopped=true`，说明已命中停止条件 `message == "该阶段无目标字段相关血缘"`，停止继续查询。
+7. 若 `stopped=false`，说明达到 `max_rounds` 仍未命中停止条件，向 agent 明确说明“已达到最大查询轮次”。
 
 ## 结果返回规范
 
