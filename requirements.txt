@@ -1,0 +1,5 @@
+langchain==1.2.10
+deepagents==0.4.4
+langchain-openai>=1.0.1
+python-dotenv>=1.1.1
+PyYAML>=6.0.2
