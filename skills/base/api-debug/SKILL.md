@@ -1,6 +1,7 @@
 ---
 name: api-debug
 description: 用快速且可复用的流程定位后端 API 故障根因。
+path: /skills/base/api-debug/SKILL.md
 allowed_tools: grep execute
 ---
 

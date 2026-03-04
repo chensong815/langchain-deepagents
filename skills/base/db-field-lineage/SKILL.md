@@ -1,6 +1,7 @@
 ---
 name: db-field-lineage
 description: 根据数据库表名与字段名调用知识图谱字段血缘接口，持续获取每一轮返回的 message。用于用户要求“查字段血缘”“按表名+字段名追踪上游/下游关系”“循环查询直到无相关血缘”为止的场景。停止条件为 message 等于“该阶段无目标字段相关血缘”。
+path: /skills/base/db-field-lineage/SKILL.md
 ---
 
 # DB Field Lineage
