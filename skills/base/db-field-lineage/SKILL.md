@@ -16,6 +16,7 @@ path: /skills/base/db-field-lineage/SKILL.md
 6. 从工具返回结果中读取 `messages` 列表（每一项是 `logic_summary`），按顺序返回给 agent。
 7. 若 `stopped=true`，说明已命中停止条件 `count=0`（且无 business_entities），停止继续查询。
 8. 若 `stopped=false`，说明达到 `max_rounds` 仍未完成追踪，向 agent 明确说明“已达到最大查询轮次”。
+9. 若输入表名为 `${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`，不允许去掉 `${} `,直接使用`${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`作为表名。
 
 ## 结果返回规范
 
