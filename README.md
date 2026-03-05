@@ -5,6 +5,7 @@
 ## 功能特性
 
 - 通过终端进行多轮对话（保留会话上下文，模型回复流式输出）。
+- 每轮对话会追加写入 `memory/memory.md`，包含 `pid/thread_id/session` 元信息，便于区分不同进程会话。
 - 使用 `create_deep_agent(...)` 创建深度智能体。
 - 通过 `FilesystemBackend` 从本地目录（`/skills/base`）加载技能。
 - 从 `/memory/AGENTS.md` 加载记忆规则。

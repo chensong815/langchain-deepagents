@@ -99,18 +99,20 @@ def _extract_tool_calls(message: BaseMessage) -> list[dict[str, Any]]:
 
 
 def _debug_print_tool_calls(message: BaseMessage, metadata: dict[str, Any] | None = None) -> None:
-    """临时调试输出：仅打印 read_file 命中日志。"""
+    """临时调试输出：打印字段血缘工具调用信息。"""
     tool_calls = _extract_tool_calls(message)
     if not tool_calls:
         return
 
-    hit_read_file = any(item.get("name") == "read_file" for item in tool_calls)
-    if not hit_read_file:
+    lineage_tools = {"query_field_lineage_step", "query_field_lineage_until_stop"}
+    hit_lineage_tool = any(item.get("name") in lineage_tools for item in tool_calls)
+    if not hit_lineage_tool:
         return
 
-    payload = json.dumps(tool_calls, ensure_ascii=False, default=str)
+    lineage_calls = [item for item in tool_calls if item.get("name") in lineage_tools]
+    payload = json.dumps(lineage_calls, ensure_ascii=False, default=str)
     node = (metadata or {}).get("langgraph_node", "unknown")
-    print(f"\n[debug:read_file_hit:node={node}] {payload}", flush=True)
+    print(f"\n[debug:lineage_tool_call:node={node}] {payload}", flush=True)
 
 
 @lru_cache(maxsize=1)

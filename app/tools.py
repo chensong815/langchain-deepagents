@@ -32,7 +32,7 @@ FIELD_LINEAGE_ENDPOINT = _read_env_text(
     "FIELD_LINEAGE_ENDPOINT",
     "http://123.207.206.62:39000/api/graph/field-lineage-analysis",
 )
-FIELD_LINEAGE_STOP_MESSAGE = "该阶段无目标字段相关血缘"
+FIELD_LINEAGE_STOP_MESSAGE = "目标字段相关血缘已完成查询"
 DEFAULT_FIELD_LINEAGE_MAX_ROUNDS = 20
 FIELD_LINEAGE_TIMEOUT_SECONDS = _read_env_float("FIELD_LINEAGE_TIMEOUT_SECONDS", 20.0)
 
@@ -100,6 +100,11 @@ def _normalize_insert_rank(value: Any, default: int = 1) -> int:
         return default
 
 
+def _print_lineage_log(tag: str, text: str) -> None:
+    """同步输出血缘工具执行日志，便于在终端观察实时进度。"""
+    print(f"[lineage:{tag}] {text}", flush=True)
+
+
 @tool
 def get_weather(location: str) -> str:
     """查询天气信息（示例桩工具）。"""
@@ -116,6 +121,7 @@ def search_knowledge_base(query: str) -> str:
 def query_field_lineage_step(name: str, target_col: str, insert_rank: int = 1) -> str:
     """调用字段血缘接口，返回单轮结果（message 字段使用 logic_summary）。"""
     rank = _normalize_insert_rank(insert_rank, default=1)
+    _print_lineage_log("call", f"name={name}, target_col={target_col}, insert_rank={rank}")
     payload = {
         "name": name,
         "target_col": target_col,
@@ -123,6 +129,10 @@ def query_field_lineage_step(name: str, target_col: str, insert_rank: int = 1) -
     }
     response = _post_json(FIELD_LINEAGE_ENDPOINT, payload, timeout=FIELD_LINEAGE_TIMEOUT_SECONDS)
     if not response.get("ok"):
+        _print_lineage_log(
+            "error",
+            f"name={name}, target_col={target_col}, insert_rank={rank}, error={response.get('error')}, details={response.get('details')}",
+        )
         return json.dumps(response, ensure_ascii=False)
 
     business_entities = response.get("business_entities")
@@ -146,6 +156,10 @@ def query_field_lineage_step(name: str, target_col: str, insert_rank: int = 1) -
         summary = str(entity.get("logic_summary", "")).strip()
         if summary:
             logic_summaries.append(summary)
+            _print_lineage_log("logic_summary", summary)
+
+    if not logic_summaries:
+        _print_lineage_log("logic_summary", "(empty)")
 
     message = "\n".join(logic_summaries)
     should_continue = bool(count > 0 and business_entities)
@@ -188,6 +202,10 @@ def query_field_lineage_until_stop(
             continue
         visited.add(visit_key)
         round_count += 1
+        _print_lineage_log(
+            "round",
+            f"round={round_count}, name={current['name']}, target_col={current['target_col']}, insert_rank={current['insert_rank']}",
+        )
 
         raw = query_field_lineage_step.invoke(
             {

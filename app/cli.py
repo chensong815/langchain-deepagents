@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.agent import get_agent, stream_chat_sync
 from app.config import get_settings
+from app.session_memory import SessionMemoryWriter
 from app.skill_catalog import list_skills
 
 
@@ -27,9 +28,15 @@ def run_cli() -> None:
     get_agent()
 
     thread_id = settings.default_thread_id
+    memory_writer = SessionMemoryWriter(
+        project_root=settings.project_root,
+        thread_id=thread_id,
+        model_name=settings.model_name,
+    )
 
     print("Deep Agent Skills 终端交互模式")
     print(f"模型: {settings.model_name} | 会话ID: {thread_id}")
+    print(f"会话历史文件: {memory_writer.memory_path}")
     print("输入内容开始对话，输入 /skills 查看技能，输入 /exit 退出。")
     _print_skills()
 
@@ -53,16 +60,22 @@ def run_cli() -> None:
 
         print("assistant> ", end="", flush=True)
         has_output = False
+        assistant_chunks: list[str] = []
         try:
             for chunk in stream_chat_sync(user_input, thread_id=thread_id):
                 if not chunk:
                     continue
                 has_output = True
+                assistant_chunks.append(chunk)
                 print(chunk, end="", flush=True)
         except Exception as exc:
             print(f"\n调用失败: {exc}")
+            memory_writer.append_turn(user_text=user_input, assistant_text=f"[ERROR] 调用失败: {exc}")
             continue
 
+        assistant_text = "".join(assistant_chunks).strip()
         if not has_output:
             print("(agent 没有返回文本)", end="")
+            assistant_text = "(agent 没有返回文本)"
+        memory_writer.append_turn(user_text=user_input, assistant_text=assistant_text)
         print()

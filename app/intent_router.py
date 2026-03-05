@@ -99,6 +99,57 @@ def _build_router_prompt(user_message: str, skills: list[SkillCard]) -> str:
     )
 
 
+def _is_context_only_followup(user_message: str) -> bool:
+    """识别仅需基于会话上下文处理的跟进请求，避免误触发 skill 路由。"""
+    text = user_message.strip().lower()
+    if not text:
+        return False
+
+    summary_keywords = (
+        "总结",
+        "概括",
+        "归纳",
+        "提炼",
+        "简述",
+        "复述",
+        "重述",
+        "润色",
+        "改写",
+        "翻译",
+        "解释",
+        "说明",
+        "再说一遍",
+        "再解释",
+        "summarize",
+        "summary",
+        "recap",
+        "rephrase",
+        "rewrite",
+        "translate",
+        "explain",
+    )
+    context_ref_keywords = (
+        "上一轮",
+        "上轮",
+        "上一条",
+        "上条",
+        "刚才",
+        "之前",
+        "前面",
+        "上一个回答",
+        "上次回答",
+        "你的回答",
+        "你刚才",
+        "last response",
+        "previous response",
+        "your answer",
+    )
+
+    has_summary_intent = any(key in text for key in summary_keywords)
+    has_context_ref = any(key in text for key in context_ref_keywords)
+    return has_summary_intent and has_context_ref
+
+
 @lru_cache(maxsize=1)
 def _get_router_model() -> ChatOpenAI:
     settings = get_settings()
@@ -148,6 +199,8 @@ def route_with_skill_intent(user_message: str) -> tuple[str | None, str | None]:
     """
     settings = get_settings()
     if not settings.intent_router_enabled:
+        return None, None
+    if _is_context_only_followup(user_message):
         return None, None
 
     skills = _get_loaded_skills()
