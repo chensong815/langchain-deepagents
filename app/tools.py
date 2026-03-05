@@ -92,6 +92,14 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float = 20.0) -> dict
     return parsed
 
 
+def _normalize_insert_rank(value: Any, default: int = 1) -> int:
+    """将 insert_rank 归一化为整数，非法值回退到 default。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 @tool
 def get_weather(location: str) -> str:
     """查询天气信息（示例桩工具）。"""
@@ -105,14 +113,18 @@ def search_knowledge_base(query: str) -> str:
 
 
 @tool
-def query_field_lineage_step(name: str, target_col: str) -> str:
-    """调用字段血缘接口，返回单轮结果，兼容新版返回结构。"""
-    payload = {"name": name, "target_col": target_col}
+def query_field_lineage_step(name: str, target_col: str, insert_rank: int = 1) -> str:
+    """调用字段血缘接口，返回单轮结果（message 字段使用 logic_summary）。"""
+    rank = _normalize_insert_rank(insert_rank, default=1)
+    payload = {
+        "name": name,
+        "target_col": target_col,
+        "insert_rank": str(rank),
+    }
     response = _post_json(FIELD_LINEAGE_ENDPOINT, payload, timeout=FIELD_LINEAGE_TIMEOUT_SECONDS)
     if not response.get("ok"):
         return json.dumps(response, ensure_ascii=False)
 
-    message = str(response.get("message", "")).strip()
     business_entities = response.get("business_entities")
     full_lineage_paths = response.get("full_lineage_paths")
     count = response.get("count")
@@ -125,31 +137,65 @@ def query_field_lineage_step(name: str, target_col: str) -> str:
         try:
             count = int(count)
         except (TypeError, ValueError):
-            count = len(full_lineage_paths)
+            count = len(business_entities)
+
+    logic_summaries: list[str] = []
+    for entity in business_entities:
+        if not isinstance(entity, dict):
+            continue
+        summary = str(entity.get("logic_summary", "")).strip()
+        if summary:
+            logic_summaries.append(summary)
+
+    message = "\n".join(logic_summaries)
+    should_continue = bool(count > 0 and business_entities)
 
     result = {
         "ok": True,
         "name": str(response.get("name", name)),
         "target_col": str(response.get("target_col", target_col)),
+        "insert_rank": str(response.get("insert_rank", str(rank))),
         "business_entities": business_entities,
         "count": count,
         "full_lineage_paths": full_lineage_paths,
+        "logic_summaries": logic_summaries,
         "message": message,
-        "should_continue": message != FIELD_LINEAGE_STOP_MESSAGE,
+        "should_continue": should_continue,
         "stop_message": FIELD_LINEAGE_STOP_MESSAGE,
     }
     return json.dumps(result, ensure_ascii=False)
 
 
 @tool
-def query_field_lineage_until_stop(name: str, target_col: str, max_rounds: int = DEFAULT_FIELD_LINEAGE_MAX_ROUNDS) -> str:
-    """循环调用字段血缘接口并汇总每轮 message，直到出现停止消息或达到最大轮次。"""
+def query_field_lineage_until_stop(
+    name: str,
+    target_col: str,
+    insert_rank: int = 1,
+    max_rounds: int = DEFAULT_FIELD_LINEAGE_MAX_ROUNDS,
+) -> str:
+    """按返回的 business_entities 迭代查询，直到 count=0 或达到最大轮次。"""
     rounds = max(1, min(max_rounds, 100))
     messages: list[str] = []
-    last_response: dict[str, Any] | None = None
+    visited: set[tuple[str, str, str]] = set()
+    initial_rank = _normalize_insert_rank(insert_rank, default=1)
+    pending: list[dict[str, str]] = [{"name": name, "target_col": target_col, "insert_rank": str(initial_rank)}]
+    round_count = 0
 
-    for _ in range(rounds):
-        raw = query_field_lineage_step.invoke({"name": name, "target_col": target_col})
+    while pending and round_count < rounds:
+        current = pending.pop(0)
+        visit_key = (current["name"], current["target_col"], current["insert_rank"])
+        if visit_key in visited:
+            continue
+        visited.add(visit_key)
+        round_count += 1
+
+        raw = query_field_lineage_step.invoke(
+            {
+                "name": current["name"],
+                "target_col": current["target_col"],
+                "insert_rank": _normalize_insert_rank(current["insert_rank"], default=1),
+            }
+        )
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
@@ -165,35 +211,47 @@ def query_field_lineage_until_stop(name: str, target_col: str, max_rounds: int =
         if not parsed.get("ok"):
             return json.dumps(parsed, ensure_ascii=False)
 
-        message = str(parsed.get("message", "")).strip()
-        messages.append(message)
-        last_response = parsed
+        logic_summaries = parsed.get("logic_summaries")
+        if isinstance(logic_summaries, list):
+            for item in logic_summaries:
+                text = str(item).strip()
+                if text:
+                    messages.append(text)
 
         if not parsed.get("should_continue", False):
-            return json.dumps(
-                {
-                    "ok": True,
-                    "name": name,
-                    "target_col": target_col,
-                    "messages": messages,
-                    "rounds": len(messages),
-                    "stopped": True,
-                    "stop_message": FIELD_LINEAGE_STOP_MESSAGE,
-                },
-                ensure_ascii=False,
-            )
+            continue
+
+        business_entities = parsed.get("business_entities")
+        if isinstance(business_entities, list):
+            for entity in business_entities:
+                if not isinstance(entity, dict):
+                    continue
+                next_name = str(entity.get("name", "")).strip()
+                if not next_name:
+                    continue
+                next_rank = str(entity.get("insert_rank", "")).strip() or "1"
+                pending.append(
+                    {
+                        "name": next_name,
+                        "target_col": current["target_col"],
+                        "insert_rank": next_rank,
+                    }
+                )
+
+    stopped = not pending
 
     return json.dumps(
         {
             "ok": True,
             "name": name,
             "target_col": target_col,
+            "insert_rank": str(initial_rank),
             "messages": messages,
-            "rounds": len(messages),
-            "stopped": False,
+            "rounds": round_count,
+            "stopped": stopped,
             "stop_message": FIELD_LINEAGE_STOP_MESSAGE,
-            "details": "Reached max_rounds before stop message.",
-            "last_should_continue": bool((last_response or {}).get("should_continue", False)),
+            "details": "" if stopped else "Reached max_rounds before lineage traversal completed.",
+            "remaining_queries": len(pending),
         },
         ensure_ascii=False,
     )
