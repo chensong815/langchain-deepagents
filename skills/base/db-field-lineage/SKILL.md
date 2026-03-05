@@ -1,6 +1,6 @@
 ---
 name: db-field-lineage
-description: 根据数据库表名、字段名和 insert_rank 调用知识图谱字段血缘接口，按返回的 business_entities 持续追踪并输出 logic_summary。用于用户要求“查字段血缘”“按表名+字段名追踪上游/下游关系”“循环查询直到无相关血缘”为止的场景。停止条件为 count=0 且 business_entities 为空。
+description: 在数据血缘分析场景下，基于目标表+字段调用字段血缘接口进行“单层挖掘+分析”，并按 logic_summary 决策是否继续下钻。逐层追踪后输出明细与最终总结。
 path: /skills/base/db-field-lineage/SKILL.md
 ---
 
@@ -13,15 +13,18 @@ path: /skills/base/db-field-lineage/SKILL.md
 3. 仅当当前轮次与会话上下文都无法确定 `name` 或 `target_col` 时，才向用户追问缺失参数。
 4. 参数齐全后，优先调用工具 `query_field_lineage_until_stop(name, target_col, insert_rank)`。
 5. 若用户未提供 `insert_rank`，默认传 `1`。
-6. 从工具返回结果中读取 `messages` 列表（每一项是 `logic_summary`），按顺序返回给 agent。
-7. 若 `stopped=true`，说明已命中停止条件 `count=0`（且无 business_entities），停止继续查询。
-8. 若 `stopped=false`，说明达到 `max_rounds` 仍未完成追踪，向 agent 明确说明“已达到最大查询轮次”。
-9. 若输入表名为 `${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`，不允许去掉 `${} `,直接使用`${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`作为表名。
+6. 工具会基于每个 `business_entity.logic_summary` 自动判断该分支是否继续下钻，判断明细在 `round_records[*].entity_decisions` 中。
+7. 从工具返回结果中读取 `messages`（逐条 `logic_summary`）按顺序输出。
+8. 若工具判定“无需继续下钻”或工具返回无上游链路（如 count=0/business_entities 为空），直接进入最终总结，不再继续调用工具。
+9. 最后一段总结必须由 agent 生成，至少包含：涉及表、轮次、停止原因、关键血缘结论（常量赋值/同名直传/多分支插入等）。
+10. 可结合工具返回的 `rounds`、`stopped`、`related_tables`、`visited_tables`、`logic_summary_count`、`round_records` 做总结。
+11. 保留表scheme占位符${}，例如完整表名为 `${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`，不允许去掉 `${} `,直接使用`${MMAC_DATA}.MMAC_MAC_SMR_CUB_GRP_SMP`作为表名。
 
 ## 结果返回规范
 
-- 只返回 `logic_summary` 相关信息，不改写字段含义。
-- 保持时间顺序：先返回首轮查询结果中的 `logic_summary`，后续轮次依次追加。
+- 先返回逐轮 `logic_summary`，最后由 agent 追加一段自然语言总结。
+- 保持时间顺序：首轮 `logic_summary` 在前，agent 总结在最后。
+- 如 `messages` 为空，也要输出“未发现可继续追踪的上游链路”的总结。
 - 若接口报错，原样返回错误信息并停止。
 
 ## 回退策略
@@ -29,4 +32,4 @@ path: /skills/base/db-field-lineage/SKILL.md
 当 `query_field_lineage_until_stop` 不可用时，改用 `query_field_lineage_step` 循环调用：
 1. 调用 `query_field_lineage_step(name, target_col, insert_rank)`（默认 `insert_rank=1`）。
 2. 读取返回中的 `logic_summaries` 并追加到输出。
-3. 若 `count>0` 且 `business_entities` 非空，则将每个实体的 `name` 和 `insert_rank` 作为下一轮查询参数，`target_col` 保持不变继续调用；否则停止。
+3. 基于每个 entity 的 `logic_summary` 判断是否继续下钻，仅将需要下钻的 entity 的 `name` 和 `insert_rank` 作为下一轮参数，`target_col` 保持不变；若无可下钻分支则停止并总结。

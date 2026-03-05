@@ -29,7 +29,7 @@ class SessionMemoryWriter:
     project_root: Path
     thread_id: str
     model_name: str
-    memory_rel_path: str = "memory/memory.md"
+    memory_dir_rel_path: str = "memory"
     pid: int = field(init=False)
     session_id: str = field(init=False)
     started_at: str = field(init=False)
@@ -42,8 +42,9 @@ class SessionMemoryWriter:
         suffix = uuid4().hex[:8]
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.session_id = f"pid-{self.pid}-{stamp}-{suffix}"
-        self.memory_path = self.project_root / self.memory_rel_path
-        self.memory_path.parent.mkdir(parents=True, exist_ok=True)
+        memory_dir = self.project_root / self.memory_dir_rel_path
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        self.memory_path = memory_dir / f"session_{self.session_id}.md"
         self._append_session_header()
 
     def _append_text(self, text: str) -> None:
@@ -51,9 +52,8 @@ class SessionMemoryWriter:
             fh.write(text)
 
     def _append_session_header(self) -> None:
-        if not self.memory_path.exists() or self.memory_path.stat().st_size == 0:
-            self._append_text("# Conversation Memory\n\n")
-
+        # 每个会话独立文件，始终写入文件头。
+        self._append_text("# Conversation Memory\n\n")
         self._append_text(
             f"## Session {self.session_id}\n"
             f"- pid: `{self.pid}`\n"
