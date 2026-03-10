@@ -9,6 +9,9 @@ from urllib import error, request
 
 from langchain.tools import tool
 
+from app.config import get_settings
+from app.sandbox import get_current_session_sandbox, _normalize_package_specs
+
 
 def _read_env_text(name: str, default: str) -> str:
     raw = os.getenv(name)
@@ -174,6 +177,56 @@ def get_weather(location: str) -> str:
 def search_knowledge_base(query: str) -> str:
     """检索内部知识库（示例桩工具）。"""
     return f"Knowledge search result for '{query}': no indexed documents yet."
+
+
+@tool
+def ensure_python_packages(packages: str) -> str:
+    """
+    在当前会话 sandbox 的 .venv 中安装 Python 依赖。
+
+    packages 支持两种格式：
+    1) JSON 数组字符串，例如 ["pandas", "requests==2.32.3"]
+    2) 每行一个 requirement 的纯文本
+    """
+    settings = get_settings()
+    sandbox = get_current_session_sandbox()
+    try:
+        package_specs = _normalize_package_specs(packages)
+    except ValueError as exc:
+        return json.dumps(
+            {
+                "ok": False,
+                "operation": "pip_install",
+                "error": "InvalidPackageSpec",
+                "details": str(exc),
+            },
+            ensure_ascii=False,
+        )
+
+    result = sandbox.ensure_packages(
+        package_specs=package_specs,
+        timeout_seconds=settings.sandbox_install_timeout_seconds,
+        output_char_limit=settings.sandbox_output_char_limit,
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
+@tool
+def run_python_code(code: str) -> str:
+    """
+    在当前会话 sandbox 的独立 .venv 中执行 Python 代码。
+
+    代码运行目录固定为 sandbox/workspace。需要输出结果时请显式使用 print(...)。
+    如有第三方依赖，先调用 ensure_python_packages。
+    """
+    settings = get_settings()
+    sandbox = get_current_session_sandbox()
+    result = sandbox.run_python_code(
+        code=code,
+        timeout_seconds=settings.sandbox_command_timeout_seconds,
+        output_char_limit=settings.sandbox_output_char_limit,
+    )
+    return json.dumps(result, ensure_ascii=False)
 
 
 @tool

@@ -1,6 +1,6 @@
 # langchain_deepagent
 
-基于 `deepagents.create_deep_agent` 的终端智能体项目，支持本地 Skill 加载、LLM 语义路由、流式输出和会话落盘。
+基于 `deepagents.create_deep_agent` 的终端智能体项目，支持本地 Skill 加载、LLM 语义路由、流式输出、会话落盘和会话级临时 Python sandbox。
 
 ## 核心能力
 
@@ -10,9 +10,12 @@
 - 内置工具：
   - `get_weather`（示例天气工具）
   - `search_knowledge_base`（示例知识库检索）
+  - `ensure_python_packages`（在当前会话 sandbox 的 `.venv` 中安装临时依赖）
+  - `run_python_code`（在当前会话 sandbox 中执行临时 Python 代码）
   - `query_field_lineage_step`（字段血缘单步查询）
   - `query_field_lineage_until_stop`（字段血缘自动迭代下钻）
 - 每次 CLI 会话创建独立文件：`memory/session_<session_id>.md`，按 Turn 记录 user/assistant 内容和时间戳。
+- 每次 CLI 会话创建独立 sandbox 目录和 `.venv`；默认退出时自动清理。
 
 ## 目录结构
 
@@ -23,12 +26,14 @@
 │   ├── cli.py              # 终端循环与命令处理
 │   ├── config.py           # .env 配置加载
 │   ├── intent_router.py    # Skill 意图路由
+│   ├── sandbox.py          # 会话级临时 sandbox / .venv
 │   ├── session_memory.py   # 会话落盘
 │   ├── skill_catalog.py    # 扫描 SKILL.md frontmatter
 │   └── tools.py            # 工具定义（含字段血缘）
 ├── skills/base/
 │   ├── api-debug/SKILL.md
 │   ├── db-field-lineage/SKILL.md
+│   ├── python-sandbox-exec/SKILL.md
 │   └── research-plan/SKILL.md
 ├── memory/
 │   ├── AGENTS.md
@@ -86,6 +91,14 @@ python3 main.py
 
 - `SKILL_SOURCES`：技能目录（逗号分隔），默认 `/skills/base`。
 - `MEMORY_SOURCES`：记忆文件路径（逗号分隔），默认 `/memory/AGENTS.md`。
+
+### Sandbox
+
+- `SANDBOX_ROOT_REL_PATH`：会话沙盒根目录，相对项目根目录，默认 `.sandbox`。
+- `SANDBOX_COMMAND_TIMEOUT_SECONDS`：临时代码执行超时，默认 `60`。
+- `SANDBOX_INSTALL_TIMEOUT_SECONDS`：依赖安装超时，默认 `180`。
+- `SANDBOX_OUTPUT_CHAR_LIMIT`：命令输出截断上限，默认 `12000`。
+- `SANDBOX_CLEANUP_ON_EXIT`：退出时是否删除会话 sandbox，默认 `true`。
 
 ### 意图路由
 
