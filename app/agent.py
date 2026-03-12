@@ -15,11 +15,15 @@ from langchain_openai import ChatOpenAI
 
 from app.config import get_settings
 from app.intent_router import route_with_skill_intent
+from app.reloading_memory import ReloadingMemoryMiddleware
+from app.sandbox import SessionSandbox, use_session_sandbox
 from app.skill_catalog import list_skills
 from app.tools import (
+    ensure_python_packages,
     get_weather,
     query_field_lineage_step,
     query_field_lineage_until_stop,
+    run_python_code,
     search_knowledge_base,
 )
 
@@ -115,10 +119,18 @@ def _debug_print_tool_calls(message: BaseMessage, metadata: dict[str, Any] | Non
     print(f"\n[debug:lineage_tool_call:node={node}] {payload}", flush=True)
 
 
-@lru_cache(maxsize=1)
-def get_agent():
+def _resolve_memory_sources(memory_sources: tuple[str, ...] | None) -> tuple[str, ...]:
+    settings = get_settings()
+    if memory_sources is None:
+        return settings.memory_sources
+    return memory_sources
+
+
+@lru_cache(maxsize=8)
+def get_agent(memory_sources: tuple[str, ...] | None = None):
     """构建并缓存 deep agent，避免每轮对话重复初始化。"""
     settings = get_settings()
+    resolved_memory_sources = _resolve_memory_sources(memory_sources)
     model = ChatOpenAI(
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
@@ -143,28 +155,36 @@ def get_agent():
         tools=[
             get_weather,
             search_knowledge_base,
+            ensure_python_packages,
+            run_python_code,
             query_field_lineage_step,
             query_field_lineage_until_stop,
         ],
         system_prompt=settings.system_prompt,
         skills=list(settings.skill_sources),
-        memory=list(settings.memory_sources),
+        middleware=[ReloadingMemoryMiddleware(backend=backend, sources=list(resolved_memory_sources))],
         backend=backend,
         checkpointer=InMemorySaver(),
         name="deepagent-skills-backend",
     )
 
 
-async def chat_once(message: str, thread_id: str) -> str:
+async def chat_once(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> str:
     """异步单次调用：返回该轮对话的最终文本。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         return immediate
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
-    result = await agent.ainvoke(payload, config=config)
+    with use_session_sandbox(sandbox):
+        result = await agent.ainvoke(payload, config=config)
 
     messages = result.get("messages", [])
     for candidate in reversed(messages):
@@ -183,16 +203,22 @@ async def chat_once(message: str, thread_id: str) -> str:
     return ""
 
 
-def chat_once_sync(message: str, thread_id: str) -> str:
+def chat_once_sync(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> str:
     """同步单次调用：返回该轮对话的最终文本。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         return immediate
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
-    result = agent.invoke(payload, config=config)
+    with use_session_sandbox(sandbox):
+        result = agent.invoke(payload, config=config)
 
     messages = result.get("messages", [])
     for candidate in reversed(messages):
@@ -211,35 +237,41 @@ def chat_once_sync(message: str, thread_id: str) -> str:
     return ""
 
 
-def stream_chat_sync(message: str, thread_id: str) -> Iterator[str]:
+def stream_chat_sync(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> Iterator[str]:
     """同步流式调用：逐块产出模型文本，供终端实时打印。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         yield immediate
         return
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
 
     seen_chunk_in_round = False
-    for emitted, metadata in agent.stream(payload, config=config, stream_mode="messages"):
-        if isinstance(emitted, (AIMessageChunk, AIMessage)):
-            _debug_print_tool_calls(emitted, metadata)
+    with use_session_sandbox(sandbox):
+        for emitted, metadata in agent.stream(payload, config=config, stream_mode="messages"):
+            if isinstance(emitted, (AIMessageChunk, AIMessage)):
+                _debug_print_tool_calls(emitted, metadata)
 
-        if metadata.get("langgraph_node") != "model":
-            continue
+            if metadata.get("langgraph_node") != "model":
+                continue
 
-        if isinstance(emitted, AIMessageChunk):
-            text = _extract_text(emitted, strip=False)
-            if text:
-                seen_chunk_in_round = True
-                yield text
-            continue
+            if isinstance(emitted, AIMessageChunk):
+                text = _extract_text(emitted, strip=False)
+                if text:
+                    seen_chunk_in_round = True
+                    yield text
+                continue
 
-        if isinstance(emitted, AIMessage):
-            # 某些模型可能直接返回完整消息；若未接收到 chunk 则兜底输出。
-            text = _extract_text(emitted, strip=False)
-            if text and not seen_chunk_in_round:
-                yield text
-            seen_chunk_in_round = False
+            if isinstance(emitted, AIMessage):
+                # 某些模型可能直接返回完整消息；若未接收到 chunk 则兜底输出。
+                text = _extract_text(emitted, strip=False)
+                if text and not seen_chunk_in_round:
+                    yield text
+                seen_chunk_in_round = False
