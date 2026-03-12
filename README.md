@@ -15,6 +15,7 @@
   - `query_field_lineage_step`（字段血缘单步查询）
   - `query_field_lineage_until_stop`（字段血缘自动迭代下钻）
 - 每次 CLI 会话创建独立文件：`memory/session_<session_id>.md`，按 Turn 记录 user/assistant 内容和时间戳。
+- 当前 CLI 会话文件会作为 memory source 注入 Agent，并在每轮调用前重新加载，形成“落盘记忆 -> 下一轮可读”的闭环。
 - 每次 CLI 会话创建独立 sandbox 目录和 `.venv`；默认退出时自动清理。
 
 ## 目录结构
@@ -26,6 +27,7 @@
 │   ├── cli.py              # 终端循环与命令处理
 │   ├── config.py           # .env 配置加载
 │   ├── intent_router.py    # Skill 意图路由
+│   ├── reloading_memory.py # 每轮重载 memory 文件的 middleware
 │   ├── sandbox.py          # 会话级临时 sandbox / .venv
 │   ├── session_memory.py   # 会话落盘
 │   ├── skill_catalog.py    # 扫描 SKILL.md frontmatter
@@ -76,6 +78,15 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
+也可以在启动时直接恢复历史会话：
+
+```bash
+python3 main.py --resume latest
+python3 main.py --resume <session_id>
+python3 main.py --pick-session
+python3 main.py --sessions
+```
+
 ## .env 配置项
 
 ### 模型与会话
@@ -91,6 +102,7 @@ python3 main.py
 
 - `SKILL_SOURCES`：技能目录（逗号分隔），默认 `/skills/base`。
 - `MEMORY_SOURCES`：记忆文件路径（逗号分隔），默认 `/memory/AGENTS.md`。
+  - CLI 启动后还会自动追加当前会话文件 `memory/session_<session_id>.md` 作为动态 memory source。
 
 ### Sandbox
 
@@ -115,7 +127,18 @@ python3 main.py
 
 - 直接输入文本：与 Agent 对话。
 - `/skills`：查看加载到的技能名称和描述。
+- `/session`：查看当前会话信息。
+- `/sessions`：查看最近历史会话。
+- `/resume <session_id|latest>`：恢复指定历史会话继续对话。
 - `/exit` / `exit` / `quit` / `/quit`：结束会话。
+
+## 会话恢复说明
+
+- 启动参数 `--resume` 可直接恢复指定会话，`--pick-session` 可在进入 CLI 前交互选择会话。
+- `--sessions` 仅打印最近历史会话并退出。
+- 会话恢复基于 `memory/session_<session_id>.md` 的历史内容和原始 `thread_id`。
+- 恢复后，新轮次会继续追加到同一个 session 文件中。
+- 当前恢复的是“对话记忆”，不会恢复旧 sandbox 工作目录中的临时文件或 `.venv`。
 
 ## 技能编写要求
 

@@ -15,6 +15,7 @@ from langchain_openai import ChatOpenAI
 
 from app.config import get_settings
 from app.intent_router import route_with_skill_intent
+from app.reloading_memory import ReloadingMemoryMiddleware
 from app.sandbox import SessionSandbox, use_session_sandbox
 from app.skill_catalog import list_skills
 from app.tools import (
@@ -118,10 +119,18 @@ def _debug_print_tool_calls(message: BaseMessage, metadata: dict[str, Any] | Non
     print(f"\n[debug:lineage_tool_call:node={node}] {payload}", flush=True)
 
 
-@lru_cache(maxsize=1)
-def get_agent():
+def _resolve_memory_sources(memory_sources: tuple[str, ...] | None) -> tuple[str, ...]:
+    settings = get_settings()
+    if memory_sources is None:
+        return settings.memory_sources
+    return memory_sources
+
+
+@lru_cache(maxsize=8)
+def get_agent(memory_sources: tuple[str, ...] | None = None):
     """构建并缓存 deep agent，避免每轮对话重复初始化。"""
     settings = get_settings()
+    resolved_memory_sources = _resolve_memory_sources(memory_sources)
     model = ChatOpenAI(
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
@@ -153,20 +162,25 @@ def get_agent():
         ],
         system_prompt=settings.system_prompt,
         skills=list(settings.skill_sources),
-        memory=list(settings.memory_sources),
+        middleware=[ReloadingMemoryMiddleware(backend=backend, sources=list(resolved_memory_sources))],
         backend=backend,
         checkpointer=InMemorySaver(),
         name="deepagent-skills-backend",
     )
 
 
-async def chat_once(message: str, thread_id: str, sandbox: SessionSandbox | None = None) -> str:
+async def chat_once(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> str:
     """异步单次调用：返回该轮对话的最终文本。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         return immediate
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     with use_session_sandbox(sandbox):
@@ -189,13 +203,18 @@ async def chat_once(message: str, thread_id: str, sandbox: SessionSandbox | None
     return ""
 
 
-def chat_once_sync(message: str, thread_id: str, sandbox: SessionSandbox | None = None) -> str:
+def chat_once_sync(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> str:
     """同步单次调用：返回该轮对话的最终文本。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         return immediate
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     with use_session_sandbox(sandbox):
@@ -218,14 +237,19 @@ def chat_once_sync(message: str, thread_id: str, sandbox: SessionSandbox | None 
     return ""
 
 
-def stream_chat_sync(message: str, thread_id: str, sandbox: SessionSandbox | None = None) -> Iterator[str]:
+def stream_chat_sync(
+    message: str,
+    thread_id: str,
+    sandbox: SessionSandbox | None = None,
+    memory_sources: tuple[str, ...] | None = None,
+) -> Iterator[str]:
     """同步流式调用：逐块产出模型文本，供终端实时打印。"""
     routed_message, immediate = route_with_skill_intent(message)
     if immediate is not None:
         yield immediate
         return
 
-    agent = get_agent()
+    agent = get_agent(memory_sources)
     payload = {"messages": [{"role": "user", "content": routed_message or message}]}
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
 
