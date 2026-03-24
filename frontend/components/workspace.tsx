@@ -4292,7 +4292,7 @@ export function Workspace({ page }: { page: WorkspacePage }) {
                       <div className="rounded-[0.95rem] border border-[color:color-mix(in_srgb,var(--foreground)_6%,white_94%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_24%,white_76%),color-mix(in_srgb,var(--panel)_96%,transparent))] px-3 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:border-[color:color-mix(in_srgb,var(--line)_86%,transparent)] dark:bg-[linear-gradient(180deg,color-mix(in_srgb,var(--background)_54%,transparent),color-mix(in_srgb,var(--panel)_92%,transparent))] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                         <textarea
                           className="min-h-[1.4rem] w-full resize-none overflow-y-auto bg-transparent text-[13px] leading-6 text-[color:#43382f] outline-none placeholder:text-[14px] placeholder:font-medium placeholder:text-[rgba(107,102,117,0.42)] dark:text-[var(--foreground)] dark:placeholder:text-[color:color-mix(in_srgb,var(--muted)_62%,white_38%)]"
-                          placeholder="继续追问、补充约束，或让它接着上一步往下做"
+                          placeholder="向SERAPH提问"
                           rows={1}
                           ref={composerTextareaRef}
                           value={chatInput}

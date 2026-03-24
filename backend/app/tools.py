@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 from urllib import error, request
 
@@ -14,31 +13,8 @@ from app.config import get_settings
 from app.sandbox import get_current_session_sandbox, _normalize_package_specs
 
 
-def _read_env_text(name: str, default: str) -> str:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    value = raw.strip()
-    return value or default
-
-
-def _read_env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-FIELD_LINEAGE_ENDPOINT = _read_env_text(
-    "FIELD_LINEAGE_ENDPOINT",
-    "http://123.207.206.62:39001/api/field-lineage-analysis",
-)
 FIELD_LINEAGE_STOP_MESSAGE = "目标字段相关血缘已完成查询"
 DEFAULT_FIELD_LINEAGE_MAX_ROUNDS = 20
-FIELD_LINEAGE_TIMEOUT_SECONDS = _read_env_float("FIELD_LINEAGE_TIMEOUT_SECONDS", 360.0)
 
 
 class LineageFieldInput(BaseModel):
@@ -269,6 +245,7 @@ def run_python_code(code: str) -> str:
 @tool(args_schema=QueryFieldLineageStepInput)
 def query_field_lineage_step(table_name: str, fields: list[dict[str, str]], insert_rank: int = 1) -> str:
     """调用字段血缘接口，返回单轮结果（message 字段使用 target_entity.analysis）。"""
+    settings = get_settings()
     rank = _normalize_insert_rank(insert_rank, default=1)
     normalized_fields = _normalize_lineage_fields(fields)
     field_names = [item["col_name"] for item in normalized_fields]
@@ -289,7 +266,11 @@ def query_field_lineage_step(table_name: str, fields: list[dict[str, str]], inse
         "insert_rank": rank,
         "fields": normalized_fields,
     }
-    response = _post_json(FIELD_LINEAGE_ENDPOINT, payload, timeout=FIELD_LINEAGE_TIMEOUT_SECONDS)
+    response = _post_json(
+        settings.field_lineage_endpoint,
+        payload,
+        timeout=settings.field_lineage_timeout_seconds,
+    )
     if not response.get("ok"):
         _print_lineage_log(
             "error",

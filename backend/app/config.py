@@ -59,6 +59,8 @@ class Settings:
     temperature: float
     default_thread_id: str
     system_prompt: str
+    field_lineage_endpoint: str
+    field_lineage_timeout_seconds: float
     intent_router_enabled: bool
     intent_router_threshold: float
     intent_router_model: str
@@ -106,6 +108,11 @@ def get_settings() -> Settings:
             "SYSTEM_PROMPT",
             "You are an engineering copilot. Be concise, factual, and action-oriented.",
         ).strip(),
+        field_lineage_endpoint=os.getenv(
+            "FIELD_LINEAGE_ENDPOINT",
+            "http://123.207.206.62:39001/api/field-lineage-analysis",
+        ).strip(),
+        field_lineage_timeout_seconds=max(1.0, float(os.getenv("FIELD_LINEAGE_TIMEOUT_SECONDS", "360"))),
         intent_router_enabled=_parse_bool(os.getenv("INTENT_ROUTER_ENABLED"), True),
         intent_router_threshold=max(0.0, min(float(os.getenv("INTENT_ROUTER_THRESHOLD", "0.72")), 1.0)),
         intent_router_model=os.getenv("INTENT_ROUTER_MODEL", "").strip(),
