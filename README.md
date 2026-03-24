@@ -1,149 +1,372 @@
 # langchain_deepagent
 
-基于 `deepagents.create_deep_agent` 的终端智能体项目，支持本地 Skill 加载、LLM 语义路由、流式输出、会话落盘和会话级临时 Python sandbox。
+一个面向本地协作与可视化调试的 Deep Agent 全栈工作台。
+
+仓库分为两个子项目：
+
+- `backend/`：Python Agent 后端，负责模型调用、工具执行、技能注入、上下文管理、会话持久化和 API 服务
+- `frontend/`：Next.js 前端，提供对话、记忆、技能、Prompt 四个工作台页面
+
+项目目标不是只做一个聊天框，而是提供一套可编辑、可追踪、可恢复的 agent 运行环境：
+
+- 支持 Web UI 和 CLI 两种使用方式
+- 支持技能卡片 `SKILL.md` 注入
+- 支持长期记忆文件与会话级运行时上下文
+- 支持流式 SSE 事件、工具调用可视化、调试追踪
+- 支持对话摘要压缩、历史会话检索、会话恢复
+
+## 适合什么场景
+
+- 想快速搭一个可运行的 LangChain / deepagents agent 工作台
+- 想把 prompt、memory、skills 做成可编辑资产，而不是写死在代码里
+- 想观察一轮对话中模型、工具、技能选择、上下文注入分别发生了什么
+- 想保留每个 session 的完整历史，同时控制实际注入模型的上下文长度
+
+## 技术栈
+
+- Backend: Python, FastAPI, LangChain, deepagents, langchain-openai
+- Frontend: Next.js App Router, React, TypeScript, Monaco Editor
+- Storage: 本地文件持久化，无外部数据库依赖
 
 ## 核心能力
 
-- 终端多轮对话，模型回复按 token 流式打印。
-- 启动时自动加载 Skill 元数据，并支持 `/skills` 查看可用技能。
-- 内置语义路由：根据用户问题在候选技能中选一个高置信技能，再把路由提示注入给 Agent。
-- 内置工具：
-  - `get_weather`（示例天气工具）
-  - `search_knowledge_base`（示例知识库检索）
-  - `ensure_python_packages`（在当前会话 sandbox 的 `.venv` 中安装临时依赖）
-  - `run_python_code`（在当前会话 sandbox 中执行临时 Python 代码）
-  - `query_field_lineage_step`（字段血缘单步查询）
-  - `query_field_lineage_until_stop`（字段血缘自动迭代下钻）
-- 每次 CLI 会话创建独立文件：`memory/session_<session_id>.md`，按 Turn 记录 user/assistant 内容和时间戳。
-- 当前 CLI 会话文件会作为 memory source 注入 Agent，并在每轮调用前重新加载，形成“落盘记忆 -> 下一轮可读”的闭环。
-- 每次 CLI 会话创建独立 sandbox 目录和 `.venv`；默认退出时自动清理。
+- 会话管理：创建、更新、删除、恢复、截断、重试
+- Agent 运行：支持流式输出、工具调用、技能路由、调试事件
+- 上下文管理：摘要压缩 + working memory + 检索召回 + 最近轮次
+- 记忆管理：长期记忆文件浏览、编辑、AI 优化建议
+- 技能管理：技能卡片列表、上传、创建、编辑、删除
+- Prompt 管理：读取和编辑后端 prompt 文件
+- 沙盒执行：按 session 隔离的工作目录与工具运行环境
 
-## 目录结构
+## 当前实现说明
+
+- `GET /api/sessions` 返回会话摘要列表，只包含列表页所需字段；完整 `messages` 和 `raw_messages` 通过 `GET /api/sessions/{session_id}` 按需加载
+- `SessionStore` 对同一 `session_id` 的写操作增加了进程内锁，并对 session state、session context、session markdown 使用原子写，降低并发写丢失风险
+- 历史检索层对 session markdown 和长期记忆 markdown 做了基于文件签名的缓存，避免每轮都全量重读和重分块
+- 前端工作台改为 `summary list + active detail` 模型，并抽出 `chat-shell`、`skills-panel`、`debug-panel` 三个职责壳层组件
+
+## 仓库结构
 
 ```text
 .
-├── app/
-│   ├── agent.py            # Agent 构建、同步/异步/流式调用
-│   ├── cli.py              # 终端循环与命令处理
-│   ├── config.py           # .env 配置加载
-│   ├── intent_router.py    # Skill 意图路由
-│   ├── reloading_memory.py # 每轮重载 memory 文件的 middleware
-│   ├── sandbox.py          # 会话级临时 sandbox / .venv
-│   ├── session_memory.py   # 会话落盘
-│   ├── skill_catalog.py    # 扫描 SKILL.md frontmatter
-│   └── tools.py            # 工具定义（含字段血缘）
-├── skills/base/
-│   ├── api-debug/SKILL.md
-│   ├── db-field-lineage/SKILL.md
-│   ├── python-sandbox-exec/SKILL.md
-│   └── research-plan/SKILL.md
-├── memory/
-│   ├── AGENTS.md
-│   └── session_*.md
-├── main.py
-├── requirements.txt
-└── pyproject.toml
+├── README.md
+├── backend/
+│   ├── README.md
+│   ├── app/
+│   │   ├── agent.py
+│   │   ├── server.py
+│   │   ├── session_store.py
+│   │   ├── context_retrieval.py
+│   │   ├── session_context.py
+│   │   ├── session_memory.py
+│   │   ├── tools.py
+│   │   ├── prompts.py
+│   │   ├── skill_catalog.py
+│   │   └── ...
+│   ├── data/
+│   │   ├── sessions/          # Web 会话 JSON 状态
+│   │   ├── session_context/   # 每个会话的运行时上下文摘要
+│   │   └── session_logs/      # raw/debug 事件日志
+│   ├── memory/                # 长期记忆文件
+│   ├── prompts/               # Prompt 模板
+│   ├── sessions/              # 每个会话的完整 markdown 历史
+│   ├── skills/                # 技能卡片
+│   ├── requirements.txt
+│   └── main.py
+└── frontend/
+    ├── README.md
+    ├── app/
+    ├── components/
+    │   ├── workspace.tsx
+    │   └── workspace/        # chat-shell、skills-panel、debug-panel
+    ├── lib/
+    └── package.json
 ```
 
-## 环境要求
+## 上下文管理是怎么工作的
 
-- Python `>=3.11`
-- 已安装依赖：
-  - `langchain==1.2.10`
-  - `deepagents==0.4.4`
-  - `langchain-openai>=1.0.1`
-  - `python-dotenv>=1.1.1`
-  - `PyYAML>=6.0.2`
+项目中的上下文不是简单地把全部聊天历史直接塞给模型，而是拆成四层：
+
+1. `data/sessions/{session_id}.json`
+   保存 Web 会话主状态：消息列表、summary、working_memory、tool 开关、技能开关等
+
+2. `data/session_context/{session_id}.md`
+   保存每轮真正用于注入 agent 的运行时上下文，包含：
+   - `Summary`
+   - `Working Memory`
+   - `Retrieved Context`
+   - `Recent Turns`
+
+3. `sessions/session_{session_id}.md`
+   保存完整会话历史，主要用于恢复历史 session 和做跨会话检索
+
+4. `data/session_logs/{session_id}.ndjson`
+   保存原始事件日志和调试日志，如 `tool_start`、`tool_end`、`debug_model_input`
+
+### 单轮请求流程
+
+1. 前端调用 `/api/sessions/{id}/messages/stream`
+2. 后端先写入用户消息
+3. 如有必要，对较早轮次自动做摘要压缩
+4. 更新 `working_memory`
+5. 从当前会话旧轮次、其他历史会话、长期记忆文件中召回相关片段
+6. 生成最新的 `session_context/{id}.md`
+7. 将 `长期记忆文件 + 当前 session_context.md` 作为 memory source 注入 agent
+8. agent 流式执行，输出 token/tool/debug 事件
+9. 写回 assistant 消息、完整 session markdown、tool 日志和新的 working memory
+10. 下一轮再读取最新的 session context，形成闭环
+
+这套设计的好处是：
+
+- 完整历史能保留
+- 真正注入模型的上下文可控
+- 历史信息可以做轻量召回
+- 运行态信息和长期记忆分层清晰
 
 ## 快速开始
 
-1. 创建并激活虚拟环境（可选，但推荐）：
+### 1. 环境准备
+
+建议环境：
+
+- Python 3.11+
+- Node.js 20+
+- npm 10+
+
+后端依赖见 `backend/requirements.txt`，核心包括：
+
+- `langchain==1.2.10`
+- `deepagents==0.4.4`
+- `langchain-openai>=1.0.1`
+- `fastapi>=0.115.0`
+- `uvicorn>=0.34.0`
+
+前端基于：
+
+- `next@16`
+- `react@19`
+- `@monaco-editor/react`
+
+### 2. 配置环境变量
+
+环境变量支持放在：
+
+- 仓库根目录 `.env`
+- `backend/.env`
+
+最少需要配置：
 
 ```bash
+DEEPSEEK_API_KEY=your_api_key
+```
+
+常用配置示例：
+
+```bash
+DEEPSEEK_API_KEY=your_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+MODEL_NAME=deepseek-chat
+MODEL_TEMPERATURE=0.3
+SYSTEM_PROMPT=You are an engineering copilot. Be concise, factual, and action-oriented.
+
+API_HOST=127.0.0.1
+API_PORT=8000
+
+SKILL_SOURCES=/skills
+MEMORY_SOURCES=/memory/AGENTS.md,/memory/MEMORY.md,/memory/SOUL.md,/memory/USER.md
+
+SESSION_MEMORY_DIR_REL_PATH=sessions
+SESSION_CONTEXT_DIR_REL_PATH=data/session_context
+SESSION_LOG_DIR_REL_PATH=data/session_logs
+SESSION_STATE_DIR_REL_PATH=data/sessions
+SANDBOX_ROOT_REL_PATH=.sandbox
+```
+
+前端如需指定后端地址：
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+### 3. 启动后端
+
+```bash
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-2. 安装依赖：
-
-```bash
 pip install -r requirements.txt
+python3 main.py serve
 ```
 
-3. 配置 `.env`（至少要有 `DEEPSEEK_API_KEY`）。
+默认监听地址来自环境变量 `API_HOST` 和 `API_PORT`。
 
-4. 启动：
+也可以显式指定：
 
 ```bash
+python3 main.py serve --host 127.0.0.1 --port 8000
+```
+
+### 4. 启动前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+默认访问：
+
+- Frontend: `http://127.0.0.1:3000`
+- Backend API: `http://127.0.0.1:8000`
+
+## CLI 用法
+
+后端保留了终端模式：
+
+```bash
+cd backend
 python3 main.py
 ```
 
-也可以在启动时直接恢复历史会话：
+常用参数：
 
 ```bash
-python3 main.py --resume latest
-python3 main.py --resume <session_id>
-python3 main.py --pick-session
 python3 main.py --sessions
+python3 main.py --resume latest
+python3 main.py --resume <SESSION_ID>
+python3 main.py --pick-session
 ```
 
-## .env 配置项
+适合快速验证模型、技能和 memory 注入逻辑，不依赖前端。
 
-### 模型与会话
+## 前端页面
 
-- `DEEPSEEK_API_KEY`：必填，DeepSeek/OpenAI 兼容 API Key。
-- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
-- `MODEL_NAME`：默认 `deepseek-chat`。
-- `MODEL_TEMPERATURE`：默认 `0.3`。
-- `DEFAULT_THREAD_ID`：默认 `default`。
-- `SYSTEM_PROMPT`：系统提示词。
+当前前端提供 4 个页面：
 
-### Skill 与 Memory
+- `/`：对话页，流式查看消息、工具、调试事件
+- `/memory`：长期记忆文件浏览、编辑、优化
+- `/skills`：技能卡片与技能文件管理
+- `/prompts`：Prompt 文件管理
 
-- `SKILL_SOURCES`：技能目录（逗号分隔），默认 `/skills/base`。
-- `MEMORY_SOURCES`：记忆文件路径（逗号分隔），默认 `/memory/AGENTS.md`。
-  - CLI 启动后还会自动追加当前会话文件 `memory/session_<session_id>.md` 作为动态 memory source。
+## 后端 API 概览
 
-### Sandbox
+### 基础
 
-- `SANDBOX_ROOT_REL_PATH`：会话沙盒根目录，相对项目根目录，默认 `.sandbox`。
-- `SANDBOX_COMMAND_TIMEOUT_SECONDS`：临时代码执行超时，默认 `60`。
-- `SANDBOX_INSTALL_TIMEOUT_SECONDS`：依赖安装超时，默认 `180`。
-- `SANDBOX_OUTPUT_CHAR_LIMIT`：命令输出截断上限，默认 `12000`。
-- `SANDBOX_CLEANUP_ON_EXIT`：退出时是否删除会话 sandbox，默认 `true`。
+- `GET /api/health`
+- `GET /api/options`
 
-### 意图路由
+### 会话
 
-- `INTENT_ROUTER_ENABLED`：默认 `true`。
-- `INTENT_ROUTER_THRESHOLD`：默认 `0.72`（越高越保守）。
-- `INTENT_ROUTER_MODEL`：默认空，空时复用 `MODEL_NAME`。
+- `GET /api/sessions`：返回摘要列表，用于左侧会话列表和最近会话选择
+- `POST /api/sessions`
+- `GET /api/sessions/{session_id}`：返回完整会话详情，包含 `messages` 和 `raw_messages`
+- `PATCH /api/sessions/{session_id}`
+- `DELETE /api/sessions/{session_id}`
 
-### 字段血缘工具
+### 消息与对话流
 
-- `FIELD_LINEAGE_ENDPOINT`：字段血缘 API，默认 `http://123.207.206.62:39000/api/graph/field-lineage-analysis`。
-- `FIELD_LINEAGE_TIMEOUT_SECONDS`：HTTP 超时秒数，默认 `20.0`。
+- `POST /api/sessions/{session_id}/messages/stream`
+- `PATCH /api/sessions/{session_id}/messages/{message_id}`
+- `POST /api/sessions/{session_id}/messages/{message_id}/truncate`
+- `POST /api/sessions/{session_id}/messages/{message_id}/retry-base`
+- `POST /api/sessions/{session_id}/compress`
 
-## CLI 命令
+### 记忆
 
-- 直接输入文本：与 Agent 对话。
-- `/skills`：查看加载到的技能名称和描述。
-- `/session`：查看当前会话信息。
-- `/sessions`：查看最近历史会话。
-- `/resume <session_id|latest>`：恢复指定历史会话继续对话。
-- `/exit` / `exit` / `quit` / `/quit`：结束会话。
+- `GET /api/memory/files`
+- `GET /api/memory/file`
+- `PUT /api/memory/file`
+- `POST /api/memory/optimize`
 
-## 会话恢复说明
+### Prompt
 
-- 启动参数 `--resume` 可直接恢复指定会话，`--pick-session` 可在进入 CLI 前交互选择会话。
-- `--sessions` 仅打印最近历史会话并退出。
-- 会话恢复基于 `memory/session_<session_id>.md` 的历史内容和原始 `thread_id`。
-- 恢复后，新轮次会继续追加到同一个 session 文件中。
-- 当前恢复的是“对话记忆”，不会恢复旧 sandbox 工作目录中的临时文件或 `.venv`。
+- `GET /api/prompts/file`
+- `PUT /api/prompts/file`
 
-## 技能编写要求
+### 技能
 
-- Skill 必须是目录形式，且目录下存在 `SKILL.md`。
-- `SKILL.md` 需要 YAML frontmatter，至少包含：
-  - `name`
-  - `description`
-- 系统会按 `SKILL_SOURCES` 扫描；同名技能后加载项覆盖先加载项。
+- `GET /api/skills`
+- `POST /api/skills`
+- `POST /api/skills/upload`
+- `GET /api/skills/file`
+- `GET /api/skills/files`
+- `PUT /api/skills/file`
+- `DELETE /api/skills/file`
+
+### 沙盒文件
+
+- `GET /api/sandbox/file`
+
+## 重要目录说明
+
+### `backend/memory/`
+
+长期记忆目录。建议只放稳定、可复用的事实或协作规则，例如：
+
+- `AGENTS.md`
+- `MEMORY.md`
+- `SOUL.md`
+- `USER.md`
+
+不要把频繁变化的会话状态直接写进这里。
+
+### `backend/skills/`
+
+技能目录。每个技能通常至少包含一个 `SKILL.md`，可选包含额外资源文件。
+
+### `backend/prompts/`
+
+Prompt 模板目录。当前项目已包含：
+
+- `conversation_compress.md`
+- `memory_optimize.md`
+- `skill_optimize.md`
+
+### `backend/sessions/`
+
+完整会话 markdown 归档，适合人工查看、恢复和跨会话检索。
+
+### `backend/data/session_context/`
+
+每个会话的一份运行时上下文文件。agent 每轮调用前都会重新加载这里的内容。
+
+## 日常开发建议
+
+- 修改 memory 或 skill 后，不需要重启整个服务；agent 每轮会重新加载 memory/skills
+- 如果你在排查为什么模型答非所问，先看 `session_context` 是否写入了预期的 summary / retrieved_context
+- 如果你在排查工具问题，先看 `data/session_logs/*.ndjson`
+- 如果你在做 prompt 或 memory 调优，优先从前端的 `/memory`、`/prompts` 页面入手
+
+## 常见问题
+
+### 1. 前端连不上后端
+
+检查：
+
+- 后端是否运行在 `API_HOST:API_PORT`
+- 前端 `NEXT_PUBLIC_API_BASE_URL` 是否配置正确
+- 浏览器控制台和后端日志是否有 CORS 或网络错误
+
+### 2. 启动时报 `Missing DEEPSEEK_API_KEY in environment`
+
+说明没有在根目录 `.env` 或 `backend/.env` 中配置 `DEEPSEEK_API_KEY`。
+
+### 3. 会话很多但模型仍然看不到早期内容
+
+这是设计使然。模型每轮主要读取：
+
+- summary
+- working memory
+- retrieved context
+- recent turns
+
+不是无上限读取全部原始历史。
+
+### 4. `npm install` 有权限问题
+
+项目前端已经通过本地 npm 缓存目录规避常见的全局缓存权限问题。优先直接在 `frontend/` 目录运行 `npm install`。
+
+## 进一步阅读
+
+- [backend/README.md](./backend/README.md)：后端结构、运行方式、API 与上下文细节
+- [frontend/README.md](./frontend/README.md)：前端页面、开发与联调说明

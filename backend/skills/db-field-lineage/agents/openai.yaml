@@ -1,0 +1,3 @@
+interface:
+  display_name: "Db Field Lineage"
+  short_description: "Trace DB field lineage with analysis-guided branching"

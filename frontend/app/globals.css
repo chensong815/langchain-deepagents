@@ -1,0 +1,236 @@
+@import "tailwindcss";
+
+:root {
+  --font-space-grotesk: "Space Grotesk", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --background: #f4efe6;
+  --foreground: #201810;
+  --panel: rgba(255, 252, 246, 0.74);
+  --panel-strong: rgba(255, 249, 238, 0.94);
+  --panel-deep: rgba(243, 234, 217, 0.92);
+  --line: rgba(76, 54, 20, 0.12);
+  --line-strong: rgba(76, 54, 20, 0.2);
+  --accent: #b67a2d;
+  --accent-strong: #8d5b1a;
+  --accent-soft: rgba(182, 122, 45, 0.16);
+  --muted: #766047;
+  --shadow: 0 30px 80px -46px rgba(76, 54, 20, 0.28);
+  --shadow-soft: 0 20px 50px -38px rgba(76, 54, 20, 0.22);
+}
+
+.dark {
+  --background: #151311;
+  --foreground: #f3ead8;
+  --panel: rgba(30, 27, 23, 0.84);
+  --panel-strong: rgba(39, 34, 29, 0.94);
+  --panel-deep: rgba(28, 24, 20, 0.96);
+  --line: rgba(216, 180, 120, 0.14);
+  --line-strong: rgba(216, 180, 120, 0.24);
+  --accent: #d39a4c;
+  --accent-strong: #e2b068;
+  --accent-soft: rgba(211, 154, 76, 0.16);
+  --muted: #b59d7d;
+  --shadow: 0 40px 110px -56px rgba(0, 0, 0, 0.82);
+  --shadow-soft: 0 24px 60px -42px rgba(0, 0, 0, 0.7);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-space-grotesk);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 28%),
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 90%, white 10%), var(--background));
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), sans-serif;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--line) 18%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--line) 16%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black 38%, transparent 88%);
+  opacity: 0.26;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+textarea,
+select,
+input {
+  font: inherit;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, white 4%), color-mix(in srgb, var(--panel) 88%, transparent));
+  border-radius: 1.8rem;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 1.1rem;
+  padding: 0.9rem 1rem;
+  color: var(--muted);
+  border: 1px solid transparent;
+  transition: 180ms ease;
+}
+
+.nav-item:hover,
+.nav-item-active {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--panel-strong) 82%, transparent);
+  color: var(--foreground);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.session-card {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 86%, white 4%), color-mix(in srgb, var(--panel) 78%, transparent));
+  padding: 1rem;
+  box-shadow: var(--shadow-soft);
+  transition: 180ms ease;
+}
+
+.session-card:hover,
+.session-card-active {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+  background: color-mix(in srgb, var(--panel-strong) 88%, transparent);
+}
+
+.action-button,
+.ghost-button,
+.icon-button,
+.input-chip,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-radius: 999px;
+  transition: 180ms ease;
+}
+
+.action-button {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  color: #fffaf2;
+  padding: 0.8rem 1.2rem;
+  font-weight: 600;
+  box-shadow: 0 18px 36px -24px color-mix(in srgb, var(--accent) 68%, transparent);
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--foreground);
+  padding: 0.75rem 1rem;
+}
+
+.icon-button {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--muted);
+  width: 2rem;
+  height: 2rem;
+}
+
+.input-chip {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--foreground);
+  padding: 0.7rem 0.95rem;
+}
+
+.status-pill {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: var(--foreground);
+  padding: 0.5rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.action-button:hover,
+.ghost-button:hover,
+.icon-button:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.markdown-body {
+  font-size: 0.95rem;
+  line-height: 1.95;
+}
+
+.markdown-body > * + * {
+  margin-top: 0.8rem;
+}
+
+.markdown-body code {
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 0.1rem 0.35rem;
+}
+
+.markdown-body pre {
+  overflow: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-deep) 96%, transparent);
+  padding: 0.9rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.2rem;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--muted) 34%, transparent);
+  background-clip: padding-box;
+}
