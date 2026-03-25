@@ -93,6 +93,29 @@ python3 main.py serve
 python3 main.py serve --host 127.0.0.1 --port 8000
 ```
 
+服务器部署，建议显式监听公网地址：
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 main.py serve --host 127.0.0.1 --port 8000
+```
+
+如果希望关闭终端后仍在后台运行，可使用：
+
+```bash
+cd backend
+source .venv/bin/activate
+nohup python3 main.py serve --host 127.0.0.1 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
+```
+
+停止后台进程：
+
+```bash
+kill "$(cat backend.8000.pid)"
+rm -f backend.8000.pid
+```
+
 ## 环境变量
 
 环境变量支持放在：

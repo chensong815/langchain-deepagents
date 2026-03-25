@@ -206,12 +206,62 @@ python3 main.py serve
 python3 main.py serve --host 127.0.0.1 --port 8000
 ```
 
+服务器部署时，可直接这样启动：
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 main.py serve --host 127.0.0.1 --port 8000
+```
+
+如果希望关闭终端后仍在后台运行，可使用：
+
+```bash
+cd backend
+source .venv/bin/activate
+nohup python3 main.py serve --host 127.0.0.1 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
+```
+
+停止后台进程：
+
+```bash
+kill "$(cat backend.8000.pid)"
+rm -f backend.8000.pid
+```
+
 ### 4. 启动前端
 
 ```bash
 cd frontend
 npm install
 npm run dev
+```
+
+服务器部署前端时，建议使用生产模式：
+
+```bash
+cd frontend
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+npm install
+npm run build
+npm run start -- --hostname 0.0.0.0 --port 39002
+```
+
+如果希望关闭终端后仍在后台运行，可使用：
+
+```bash
+cd frontend
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+npm install
+npm run build
+nohup npm run start -- --hostname 0.0.0.0 --port 39002 > frontend.39002.log 2>&1 & echo $! > frontend.39002.pid
+```
+
+停止后台进程：
+
+```bash
+kill "$(cat frontend.39002.pid)"
+rm -f frontend.39002.pid
 ```
 
 默认访问：
