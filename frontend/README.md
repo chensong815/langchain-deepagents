@@ -47,7 +47,7 @@ npm run start
 服务器部署并对外提供服务时，建议使用生产模式并显式指定端口：
 
 ```bash
-export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 npm run build
 npm run start -- --hostname 0.0.0.0 --port 39002
 ```
@@ -55,9 +55,16 @@ npm run start -- --hostname 0.0.0.0 --port 39002
 如果希望关闭终端后仍在后台运行，可使用：
 
 ```bash
-export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 npm run build
 nohup npm run start -- --hostname 0.0.0.0 --port 39002 > frontend.39002.log 2>&1 & echo $! > frontend.39002.pid
+```
+
+服务器如果使用开发模式：
+
+```bash
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
+nohup npm run dev -- --hostname 0.0.0.0 --port 39002 > frontend.39002.log 2>&1 & echo $! > frontend.39002.pid
 ```
 
 停止后台进程：
@@ -76,6 +83,12 @@ rm -f frontend.39002.pid
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+服务器示例：
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 ```
 
 ## 与后端联调

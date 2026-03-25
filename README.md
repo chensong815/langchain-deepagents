@@ -171,6 +171,7 @@ SYSTEM_PROMPT=You are an engineering copilot. Be concise, factual, and action-or
 
 API_HOST=127.0.0.1
 API_PORT=8000
+CORS_ORIGINS=http://localhost:39002,http://127.0.0.1:39002
 
 SKILL_SOURCES=/skills
 MEMORY_SOURCES=/memory/AGENTS.md,/memory/MEMORY.md,/memory/SOUL.md,/memory/USER.md
@@ -186,6 +187,15 @@ SANDBOX_ROOT_REL_PATH=.sandbox
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+服务器示例配置：
+
+```bash
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 ```
 
 ### 3. 启动后端
@@ -211,7 +221,8 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 ```bash
 cd backend
 source .venv/bin/activate
-python3 main.py serve --host 127.0.0.1 --port 8000
+export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+python3 main.py serve --host 0.0.0.0 --port 8000
 ```
 
 如果希望关闭终端后仍在后台运行，可使用：
@@ -219,7 +230,8 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 ```bash
 cd backend
 source .venv/bin/activate
-nohup python3 main.py serve --host 127.0.0.1 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
+export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+nohup python3 main.py serve --host 0.0.0.0 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
 ```
 
 停止后台进程：
@@ -241,7 +253,7 @@ npm run dev
 
 ```bash
 cd frontend
-export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 npm install
 npm run build
 npm run start -- --hostname 0.0.0.0 --port 39002
@@ -251,10 +263,18 @@ npm run start -- --hostname 0.0.0.0 --port 39002
 
 ```bash
 cd frontend
-export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:39001
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
 npm install
 npm run build
 nohup npm run start -- --hostname 0.0.0.0 --port 39002 > frontend.39002.log 2>&1 & echo $! > frontend.39002.pid
+```
+
+如果服务器上使用开发模式：
+
+```bash
+cd frontend
+export NEXT_PUBLIC_API_BASE_URL=http://<SERVER_IP>:8000
+nohup npm run dev -- --hostname 0.0.0.0 --port 39002 > frontend.39002.log 2>&1 & echo $! > frontend.39002.pid
 ```
 
 停止后台进程：

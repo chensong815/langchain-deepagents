@@ -98,7 +98,8 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 ```bash
 cd backend
 source .venv/bin/activate
-python3 main.py serve --host 127.0.0.1 --port 8000
+export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+python3 main.py serve --host 0.0.0.0 --port 8000
 ```
 
 如果希望关闭终端后仍在后台运行，可使用：
@@ -106,7 +107,8 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 ```bash
 cd backend
 source .venv/bin/activate
-nohup python3 main.py serve --host 127.0.0.1 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
+export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+nohup python3 main.py serve --host 0.0.0.0 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
 ```
 
 停止后台进程：
@@ -139,6 +141,7 @@ SYSTEM_PROMPT=You are an engineering copilot. Be concise, factual, and action-or
 
 API_HOST=127.0.0.1
 API_PORT=8000
+CORS_ORIGINS=http://localhost:39002,http://127.0.0.1:39002
 
 SKILL_SOURCES=/skills
 MEMORY_SOURCES=/memory/AGENTS.md,/memory/MEMORY.md,/memory/SOUL.md,/memory/USER.md
@@ -148,6 +151,14 @@ SESSION_CONTEXT_DIR_REL_PATH=data/session_context
 SESSION_LOG_DIR_REL_PATH=data/session_logs
 SESSION_STATE_DIR_REL_PATH=data/sessions
 SANDBOX_ROOT_REL_PATH=.sandbox
+```
+
+服务器示例：
+
+```bash
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
 ```
 
 ## 会话与上下文文件
