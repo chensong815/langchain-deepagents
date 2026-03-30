@@ -1,9 +1,8 @@
-"""会话级临时 Python sandbox。"""
+"""会话级临时 Python 执行工作区。"""
 
 from __future__ import annotations
 
 import atexit
-import json
 import os
 import shutil
 import subprocess
@@ -26,34 +25,6 @@ def _truncate_text(text: str, limit: int) -> str:
     return f"{text[:limit]}\n...[truncated {omitted} chars]"
 
 
-def _normalize_package_specs(raw: str) -> list[str]:
-    content = (raw or "").strip()
-    if not content:
-        return []
-
-    parsed: list[str] = []
-    if content.startswith("["):
-        try:
-            loaded = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"packages must be a JSON list or newline-delimited text: {exc}") from exc
-        if not isinstance(loaded, list):
-            raise ValueError("packages JSON must be a list of strings.")
-        for item in loaded:
-            spec = str(item).strip()
-            if spec:
-                parsed.append(spec)
-    else:
-        parsed = [line.strip() for line in content.splitlines() if line.strip()]
-
-    blocked_tokens = {";", "&", "|", ">", "<", "`", "$(", "..", "/", "\\"}
-    for spec in parsed:
-        if any(token in spec for token in blocked_tokens):
-            raise ValueError(f"package spec contains blocked token: {spec}")
-
-    return parsed
-
-
 def resolve_session_sandbox_path(project_root: Path, sandbox_root_rel_path: str, session_id: str) -> Path:
     sandbox_root = project_root / sandbox_root_rel_path
     return sandbox_root / f"session_{session_id}"
@@ -63,9 +34,47 @@ def _cleanup_sandbox_path(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _resolve_python_bin_path() -> Path:
+    configured = os.getenv("SANDBOX_PYTHON_BIN", "").strip()
+    if configured:
+        configured_path = Path(configured)
+        if configured_path.is_absolute():
+            if not configured_path.exists():
+                raise RuntimeError(f"SANDBOX_PYTHON_BIN does not exist: {configured}")
+            return configured_path.resolve()
+        discovered = shutil.which(configured)
+        if discovered is None:
+            raise RuntimeError(f"SANDBOX_PYTHON_BIN is not executable: {configured}")
+        return Path(discovered).resolve()
+
+    candidates: list[Path] = []
+    if sys.prefix != sys.base_prefix:
+        base_executable = getattr(sys, "_base_executable", None)
+        if isinstance(base_executable, str) and base_executable.strip():
+            candidates.append(Path(base_executable))
+
+        base_bin = Path(sys.base_prefix) / "bin"
+        candidates.extend(
+            [
+                base_bin / f"python{sys.version_info.major}.{sys.version_info.minor}",
+                base_bin / f"python{sys.version_info.major}",
+                base_bin / "python3",
+                base_bin / "python",
+            ]
+        )
+
+    candidates.append(Path(sys.executable))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+
+    return Path(sys.executable).resolve()
+
+
 @dataclass
 class SessionSandbox:
-    """为单个 CLI 会话提供独立的临时工作目录和虚拟环境。"""
+    """为单个会话提供独立的临时工作目录。"""
 
     project_root: Path
     session_id: str
@@ -74,7 +83,6 @@ class SessionSandbox:
     sandbox_path: Path = field(init=False)
     workspace_path: Path = field(init=False)
     runs_path: Path = field(init=False)
-    venv_path: Path = field(init=False)
     _cleaned_up: bool = field(default=False, init=False)
     _run_index: int = field(default=0, init=False)
 
@@ -88,7 +96,6 @@ class SessionSandbox:
         )
         self.workspace_path = self.sandbox_path / "workspace"
         self.runs_path = self.sandbox_path / "runs"
-        self.venv_path = self.sandbox_path / ".venv"
         self.sandbox_path.mkdir(parents=True, exist_ok=True)
         self.workspace_path.mkdir(parents=True, exist_ok=True)
         self.runs_path.mkdir(parents=True, exist_ok=True)
@@ -100,54 +107,9 @@ class SessionSandbox:
 
     @property
     def python_bin(self) -> Path:
-        return self.venv_path / "bin" / "python"
-
-    def ensure_venv(self, timeout_seconds: float, output_char_limit: int) -> dict[str, object]:
-        if self.python_bin.exists():
-            return {
-                "ok": True,
-                "created": False,
-                "python": str(self.python_bin),
-                "sandbox_path": str(self.sandbox_path),
-            }
-
-        return self._run_subprocess(
-            [sys.executable, "-m", "venv", str(self.venv_path)],
-            cwd=self.sandbox_path,
-            timeout_seconds=timeout_seconds,
-            output_char_limit=output_char_limit,
-            operation="create_venv",
-        )
-
-    def ensure_packages(self, package_specs: list[str], timeout_seconds: float, output_char_limit: int) -> dict[str, object]:
-        if not package_specs:
-            return {
-                "ok": True,
-                "installed": [],
-                "python": str(self.python_bin),
-                "sandbox_path": str(self.sandbox_path),
-                "message": "No package specs provided.",
-            }
-
-        setup = self.ensure_venv(timeout_seconds=timeout_seconds, output_char_limit=output_char_limit)
-        if not setup.get("ok"):
-            return setup
-
-        result = self._run_subprocess(
-            [str(self.python_bin), "-m", "pip", "install", *package_specs],
-            cwd=self.workspace_path,
-            timeout_seconds=timeout_seconds,
-            output_char_limit=output_char_limit,
-            operation="pip_install",
-        )
-        result["installed"] = package_specs
-        return result
+        return _resolve_python_bin_path()
 
     def run_python_code(self, code: str, timeout_seconds: float, output_char_limit: int) -> dict[str, object]:
-        setup = self.ensure_venv(timeout_seconds=timeout_seconds, output_char_limit=output_char_limit)
-        if not setup.get("ok"):
-            return setup
-
         self._run_index += 1
         script_path = self.runs_path / f"run_{self._run_index}_{uuid4().hex[:8]}.py"
         script_path.write_text(code or "", encoding="utf-8")

@@ -380,8 +380,7 @@ def create_app() -> FastAPI:
             "tool_switches": [
                 {"id": "weather", "label": "Weather"},
                 {"id": "knowledge_base", "label": "Knowledge Base"},
-                {"id": "python_packages", "label": "Pip Install"},
-                {"id": "python_code", "label": "Python Sandbox"},
+                {"id": "python_code", "label": "Python Runner"},
                 {"id": "field_lineage_step", "label": "Field Lineage Step"},
                 {"id": "field_lineage_auto", "label": "Field Lineage Auto"},
             ],

@@ -36,7 +36,6 @@ from app.skill_catalog import list_skills
 DEFAULT_TOOL_SWITCHES = {
     "weather": True,
     "knowledge_base": True,
-    "python_packages": True,
     "python_code": True,
     "field_lineage_step": True,
     "field_lineage_auto": True,
@@ -245,6 +244,16 @@ def _normalize_artifacts(raw: Any, *, max_items: int) -> list[dict[str, str]]:
         if len(artifacts) >= max_items:
             break
     return artifacts
+
+
+def _normalize_tool_switches(raw: Any) -> dict[str, bool]:
+    normalized = deepcopy(DEFAULT_TOOL_SWITCHES)
+    if not isinstance(raw, dict):
+        return normalized
+    for key in DEFAULT_TOOL_SWITCHES:
+        if key in raw:
+            normalized[key] = bool(raw[key])
+    return normalized
 
 
 def _normalize_retrieved_context(raw: Any, *, max_items: int) -> list[dict[str, Any]]:
@@ -593,7 +602,7 @@ def _normalize_session_payload(payload: dict[str, Any]) -> dict[str, Any]:
         session.get("retrieved_context", []),
         max_items=MAX_RETRIEVED_CONTEXT,
     )
-    session.setdefault("tool_switches", deepcopy(DEFAULT_TOOL_SWITCHES))
+    session["tool_switches"] = _normalize_tool_switches(session.get("tool_switches"))
     session.setdefault("skills_enabled", _default_skills())
     session["working_memory"] = _normalize_working_memory(session.get("working_memory"))
     session["turn_state"] = _normalize_turn_state(session.get("turn_state"))
@@ -828,7 +837,7 @@ class SessionStore:
             if debug is not None:
                 session["debug"] = bool(debug)
             if tool_switches is not None:
-                session["tool_switches"] = {**session["tool_switches"], **tool_switches}
+                session["tool_switches"] = _normalize_tool_switches({**session["tool_switches"], **tool_switches})
             if skills_enabled is not None:
                 available = set(_default_skills())
                 session["skills_enabled"] = [item for item in skills_enabled if item in available]

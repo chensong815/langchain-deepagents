@@ -10,7 +10,7 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.sandbox import get_current_session_sandbox, _normalize_package_specs
+from app.sandbox import get_current_session_sandbox
 
 
 FIELD_LINEAGE_STOP_MESSAGE = "目标字段相关血缘已完成查询"
@@ -193,44 +193,12 @@ def search_knowledge_base(query: str) -> str:
 
 
 @tool
-def ensure_python_packages(packages: str) -> str:
-    """
-    在当前会话 sandbox 的 .venv 中安装 Python 依赖。
-
-    packages 支持两种格式：
-    1) JSON 数组字符串，例如 ["pandas", "requests==2.32.3"]
-    2) 每行一个 requirement 的纯文本
-    """
-    settings = get_settings()
-    sandbox = get_current_session_sandbox()
-    try:
-        package_specs = _normalize_package_specs(packages)
-    except ValueError as exc:
-        return json.dumps(
-            {
-                "ok": False,
-                "operation": "pip_install",
-                "error": "InvalidPackageSpec",
-                "details": str(exc),
-            },
-            ensure_ascii=False,
-        )
-
-    result = sandbox.ensure_packages(
-        package_specs=package_specs,
-        timeout_seconds=settings.sandbox_install_timeout_seconds,
-        output_char_limit=settings.sandbox_output_char_limit,
-    )
-    return json.dumps(result, ensure_ascii=False)
-
-
-@tool
 def run_python_code(code: str) -> str:
     """
-    在当前会话 sandbox 的独立 .venv 中执行 Python 代码。
+    在当前会话 sandbox 的独立工作目录中执行 Python 代码。
 
     代码运行目录固定为 sandbox/workspace。需要输出结果时请显式使用 print(...)。
-    如有第三方依赖，先调用 ensure_python_packages。
+    第三方依赖需要由部署容器预先提供。
     """
     settings = get_settings()
     sandbox = get_current_session_sandbox()

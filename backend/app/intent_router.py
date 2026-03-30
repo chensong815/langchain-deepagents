@@ -85,7 +85,14 @@ def _parse_json_from_text(raw: str) -> dict[str, Any] | None:
 def _skill_catalog_prompt(skills: list[SkillCard]) -> str:
     lines = []
     for item in skills:
-        lines.append(f"- name: {item['name']}\n  description: {item['description']}")
+        block = [f"- name: {item['name']}", f"  description: {item['description']}"]
+        triggers = [str(trigger).strip() for trigger in item.get("triggers", []) if str(trigger).strip()]
+        if triggers:
+            block.append(f"  triggers: {', '.join(triggers[:12])}")
+        required_slots = [str(slot).strip() for slot in item.get("required_slots", []) if str(slot).strip()]
+        if required_slots:
+            block.append(f"  required_slots: {', '.join(required_slots[:8])}")
+        lines.append("\n".join(block))
     return "\n".join(lines)
 
 
@@ -94,11 +101,46 @@ def _serialize_skill_cards(skills: list[SkillCard]) -> list[dict[str, Any]]:
         {
             "name": item["name"],
             "description": item["description"],
+            "triggers": item.get("triggers", []),
+            "required_slots": item.get("required_slots", []),
+            "output_contract": item.get("output_contract", ""),
             "path": item["path"],
             "source": item["source"],
         }
         for item in skills
     ]
+
+
+def _find_skill_card(skills: list[SkillCard], skill_name: str | None) -> SkillCard | None:
+    if not skill_name:
+        return None
+    return next((item for item in skills if item["name"] == skill_name), None)
+
+
+def _build_skill_execution_guidance(selected_skill_name: str | None, skills: list[SkillCard]) -> str:
+    lines = ["优先依据该 skill 的 SKILL.md 执行。"]
+    selected = _find_skill_card(skills, selected_skill_name)
+    if selected is None:
+        lines.append("先尝试从同一会话上下文补全缺失参数，仍不足时再追问用户，不要臆造参数。")
+        return "\n".join(lines)
+
+    required_slots = [str(slot).strip() for slot in selected.get("required_slots", []) if str(slot).strip()]
+    if required_slots:
+        lines.append(
+            f"必需输入槽位: {', '.join(required_slots)}。先尝试从同一会话上下文补全；仍缺失时再追问用户，不要臆造参数。"
+        )
+    else:
+        lines.append("先尝试从同一会话上下文补全缺失参数，仍不足时再追问用户，不要臆造参数。")
+
+    output_contract = str(selected.get("output_contract", "")).strip()
+    if output_contract:
+        lines.append(f"输出结果需满足: {output_contract}")
+
+    allowed_tools = [str(tool).strip() for tool in selected.get("allowed_tools", []) if str(tool).strip()]
+    if allowed_tools:
+        lines.append(f"优先使用该 skill 声明的工具: {', '.join(allowed_tools)}。")
+
+    return "\n".join(lines)
 
 
 def _build_router_prompt(user_message: str, skills: list[SkillCard]) -> str:
@@ -317,12 +359,13 @@ def route_with_skill_intent(
     trace["parsed_response"] = parsed
     if not parsed:
         if preferred_skill and _looks_like_followup_message(user_message):
+            guidance = _build_skill_execution_guidance(preferred_skill, skills)
             return SkillRouteResult(
                 (
                     "[SKILL_ROUTER_HINT]\n"
                     f'{json.dumps({"selected_skill": preferred_skill, "confidence": 0.99, "reason": "继续沿用当前会话 active skill"}, ensure_ascii=False)}\n'
                     "[/SKILL_ROUTER_HINT]\n"
-                    "优先依据该 skill 的 SKILL.md 执行；先尝试从同一会话上下文补全缺失参数，仍不足时再追问用户，不要臆造参数。\n"
+                    f"{guidance}\n"
                     f"用户原始问题：{user_message}"
                 ),
                 None,
@@ -371,11 +414,12 @@ def route_with_skill_intent(
         "confidence": decision.confidence,
         "reason": decision.reason,
     }
+    guidance = _build_skill_execution_guidance(decision.selected_skill, skills)
     augmented = (
         "[SKILL_ROUTER_HINT]\n"
         f"{json.dumps(hint_payload, ensure_ascii=False)}\n"
         "[/SKILL_ROUTER_HINT]\n"
-        "优先依据该 skill 的 SKILL.md 执行；先尝试从同一会话上下文补全缺失参数，仍不足时再追问用户，不要臆造参数。\n"
+        f"{guidance}\n"
         f"用户原始问题：{decision.normalized_query}"
     )
     return SkillRouteResult(

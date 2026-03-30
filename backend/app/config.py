@@ -71,7 +71,6 @@ class Settings:
     session_log_dir_rel_path: str
     sandbox_root_rel_path: str
     sandbox_command_timeout_seconds: float
-    sandbox_install_timeout_seconds: float
     sandbox_output_char_limit: int
     sandbox_cleanup_on_exit: bool
     prompts_dir_rel_path: str
@@ -128,7 +127,6 @@ def get_settings() -> Settings:
         or "data/session_logs",
         sandbox_root_rel_path=os.getenv("SANDBOX_ROOT_REL_PATH", ".sandbox").strip() or ".sandbox",
         sandbox_command_timeout_seconds=max(1.0, float(os.getenv("SANDBOX_COMMAND_TIMEOUT_SECONDS", "60"))),
-        sandbox_install_timeout_seconds=max(1.0, float(os.getenv("SANDBOX_INSTALL_TIMEOUT_SECONDS", "180"))),
         sandbox_output_char_limit=max(1000, int(os.getenv("SANDBOX_OUTPUT_CHAR_LIMIT", "12000"))),
         sandbox_cleanup_on_exit=_parse_bool(os.getenv("SANDBOX_CLEANUP_ON_EXIT"), True),
         prompts_dir_rel_path=os.getenv("PROMPTS_DIR_REL_PATH", "prompts").strip() or "prompts",

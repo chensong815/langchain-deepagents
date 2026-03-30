@@ -21,6 +21,7 @@ Python 后端项目，负责：
 - 历史 session 和长期记忆检索带文件签名缓存，降低重复解析 markdown 的成本
 - 长期记忆文件与技能文件热加载
 - Skill 卡片管理、Prompt 管理、Memory 管理
+- 会话级 Python 工作目录执行，依赖由部署环境预装
 
 ## 目录说明
 
@@ -99,6 +100,7 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 cd backend
 source .venv/bin/activate
 export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+export SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 python3 main.py serve --host 0.0.0.0 --port 8000
 ```
 
@@ -108,6 +110,7 @@ python3 main.py serve --host 0.0.0.0 --port 8000
 cd backend
 source .venv/bin/activate
 export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+export SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 nohup python3 main.py serve --host 0.0.0.0 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
 ```
 
@@ -151,7 +154,10 @@ SESSION_CONTEXT_DIR_REL_PATH=data/session_context
 SESSION_LOG_DIR_REL_PATH=data/session_logs
 SESSION_STATE_DIR_REL_PATH=data/sessions
 SANDBOX_ROOT_REL_PATH=.sandbox
+SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 ```
+
+如果服务进程运行在项目 `.venv` 中，但希望工具执行使用容器基础 Python 已安装的依赖，需要把 `SANDBOX_PYTHON_BIN` 指向容器内对应解释器。
 
 服务器示例：
 

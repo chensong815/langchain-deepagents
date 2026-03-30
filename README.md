@@ -36,7 +36,7 @@
 - 记忆管理：长期记忆文件浏览、编辑、AI 优化建议
 - 技能管理：技能卡片列表、上传、创建、编辑、删除
 - Prompt 管理：读取和编辑后端 prompt 文件
-- 沙盒执行：按 session 隔离的工作目录与工具运行环境
+- 沙盒执行：按 session 隔离的工作目录与 Python 执行环境
 
 ## 当前实现说明
 
@@ -181,6 +181,7 @@ SESSION_CONTEXT_DIR_REL_PATH=data/session_context
 SESSION_LOG_DIR_REL_PATH=data/session_logs
 SESSION_STATE_DIR_REL_PATH=data/sessions
 SANDBOX_ROOT_REL_PATH=.sandbox
+SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 ```
 
 前端如需指定后端地址：
@@ -222,6 +223,7 @@ python3 main.py serve --host 127.0.0.1 --port 8000
 cd backend
 source .venv/bin/activate
 export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+export SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 python3 main.py serve --host 0.0.0.0 --port 8000
 ```
 
@@ -231,8 +233,11 @@ python3 main.py serve --host 0.0.0.0 --port 8000
 cd backend
 source .venv/bin/activate
 export CORS_ORIGINS=http://<SERVER_IP>:39002,http://localhost:39002,http://127.0.0.1:39002
+export SANDBOX_PYTHON_BIN=/usr/local/bin/python3
 nohup python3 main.py serve --host 0.0.0.0 --port 8000 > backend.8000.log 2>&1 & echo $! > backend.8000.pid
 ```
+
+如果后端本身运行在项目 `.venv` 中，但工具执行需要使用容器基础 Python 里已预装的依赖，必须设置 `SANDBOX_PYTHON_BIN` 指向容器内的目标解释器。
 
 停止后台进程：
 

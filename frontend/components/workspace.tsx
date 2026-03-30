@@ -779,7 +779,6 @@ function resolveToolDisplayName(label: string) {
   const aliases: Record<string, string> = {
     weather: "查询天气",
     knowledge_base: "检索知识库",
-    python_packages: "安装依赖",
     python_code: "执行 Python",
     field_lineage_step: "字段血缘追踪",
     field_lineage_auto: "自动血缘分析",

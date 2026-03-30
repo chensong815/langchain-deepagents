@@ -28,7 +28,6 @@ from app.sandbox import SessionSandbox, use_session_sandbox
 from app.serialization import make_json_safe
 from app.skill_catalog import list_skills
 from app.tools import (
-    ensure_python_packages,
     get_weather,
     query_field_lineage_step,
     query_field_lineage_until_stop,
@@ -40,7 +39,6 @@ from app.tools import (
 TOOL_REGISTRY = {
     "weather": get_weather,
     "knowledge_base": search_knowledge_base,
-    "python_packages": ensure_python_packages,
     "python_code": run_python_code,
     "field_lineage_step": query_field_lineage_step,
     "field_lineage_auto": query_field_lineage_until_stop,
