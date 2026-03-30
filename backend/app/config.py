@@ -90,7 +90,12 @@ def get_settings() -> Settings:
 
     cors_origins = _parse_csv(
         os.getenv("CORS_ORIGINS"),
-        ("http://localhost:39002", "http://127.0.0.1:39002"),
+        (
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:39002",
+            "http://127.0.0.1:39002",
+        ),
     )
 
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
