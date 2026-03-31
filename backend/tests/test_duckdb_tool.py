@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.tools import DuckDBRunner, run_duckdb_sql
+
+
+class _FakeCursor:
+    def __init__(self, rows: list[tuple[object, ...]], columns: list[str]) -> None:
+        self._rows = rows
+        self.description = [(column, None, None, None, None, None, None) for column in columns]
+
+    def execute(self, sql: str) -> None:
+        self.sql = sql
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return list(self._rows)
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeConnection:
+    def __init__(self, rows: list[tuple[object, ...]], columns: list[str]) -> None:
+        self._cursor = _FakeCursor(rows, columns)
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        return None
+
+
+class DuckDBToolTests(unittest.TestCase):
+    def test_runner_rejects_mutating_sql(self) -> None:
+        runner = DuckDBRunner(db_path=":memory:", sql_limit_rows=10)
+
+        ok, digest, preview, error = runner.execute("DELETE FROM metrics", meta={})
+
+        self.assertFalse(ok)
+        self.assertEqual(digest, {})
+        self.assertIsNone(preview)
+        self.assertIn("只读查询", error or "")
+
+    def test_runner_builds_digest_and_preview(self) -> None:
+        rows = [
+            ("2026-01-01", 10),
+            ("2026-02-01", 20),
+        ]
+        columns = ["order_date", "amount"]
+        fake_connection = _FakeConnection(rows, columns)
+        fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
+
+        with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+            runner = DuckDBRunner(db_path=":memory:", sql_limit_rows=1)
+            ok, digest, preview, error = runner.execute("SELECT * FROM metrics", meta={})
+
+        self.assertTrue(ok)
+        self.assertIsNone(error)
+        self.assertEqual(digest["rows"], 2)
+        self.assertEqual(digest["preview_rows"], 1)
+        self.assertEqual(digest["period"], ["2026-01-01", "2026-02-01"])
+        self.assertAlmostEqual(digest["keyvals"]["mean"], 15.0)
+        self.assertIn("order_date,amount", preview or "")
+        self.assertIn("等2行数据", preview or "")
+
+    def test_tool_returns_json_payload(self) -> None:
+        rows = [(1, "alice")]
+        columns = ["id", "name"]
+        fake_connection = _FakeConnection(rows, columns)
+        fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
+
+        with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+            raw = run_duckdb_sql.invoke(
+                {
+                    "db_path": ":memory:",
+                    "sql": "SELECT * FROM users",
+                    "max_rows": 10,
+                }
+            )
+
+        payload = json.loads(raw)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["digest"]["rows"], 1)
+        self.assertIn("id,name", payload["preview"])
+
+    def test_tool_uses_env_db_path_when_input_missing(self) -> None:
+        rows = [(1,)]
+        columns = ["id"]
+        fake_connection = _FakeConnection(rows, columns)
+        fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
+
+        with patch.dict(os.environ, {"DB_PATH": ":memory:"}, clear=False):
+            with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+                raw = run_duckdb_sql.invoke(
+                    {
+                        "sql": "SELECT 1",
+                        "max_rows": 10,
+                    }
+                )
+
+        payload = json.loads(raw)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["resolved_db_path"], ":memory:")
+
+
+if __name__ == "__main__":
+    unittest.main()

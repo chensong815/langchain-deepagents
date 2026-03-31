@@ -72,7 +72,6 @@ class Settings:
     sandbox_root_rel_path: str
     sandbox_command_timeout_seconds: float
     sandbox_output_char_limit: int
-    sandbox_cleanup_on_exit: bool
     prompts_dir_rel_path: str
     session_state_dir_rel_path: str
     api_host: str
@@ -133,7 +132,6 @@ def get_settings() -> Settings:
         sandbox_root_rel_path=os.getenv("SANDBOX_ROOT_REL_PATH", ".sandbox").strip() or ".sandbox",
         sandbox_command_timeout_seconds=max(1.0, float(os.getenv("SANDBOX_COMMAND_TIMEOUT_SECONDS", "60"))),
         sandbox_output_char_limit=max(1000, int(os.getenv("SANDBOX_OUTPUT_CHAR_LIMIT", "12000"))),
-        sandbox_cleanup_on_exit=_parse_bool(os.getenv("SANDBOX_CLEANUP_ON_EXIT"), True),
         prompts_dir_rel_path=os.getenv("PROMPTS_DIR_REL_PATH", "prompts").strip() or "prompts",
         session_state_dir_rel_path=os.getenv("SESSION_STATE_DIR_REL_PATH", "data/sessions").strip() or "data/sessions",
         api_host=os.getenv("API_HOST", "127.0.0.1").strip() or "127.0.0.1",

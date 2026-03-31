@@ -149,6 +149,13 @@ def _resolve_safe_sandbox_file_path(raw_path: str) -> Path:
     if not path_text:
         raise HTTPException(status_code=400, detail="缺少文件路径")
 
+    # Frontend artifacts historically used `/.sandbox/...` to mean a project-
+    # relative sandbox path, not the filesystem root.
+    if path_text.startswith("/.sandbox/"):
+        path_text = path_text[1:]
+    elif path_text.startswith("/backend/.sandbox/"):
+        path_text = path_text[len("/backend/") :]
+
     candidate_path = Path(path_text)
     if candidate_path.is_absolute():
         candidate = candidate_path.resolve()
@@ -378,9 +385,8 @@ def create_app() -> FastAPI:
             "models": model_candidates,
             "skills": skills,
             "tool_switches": [
-                {"id": "weather", "label": "Weather"},
-                {"id": "knowledge_base", "label": "Knowledge Base"},
                 {"id": "python_code", "label": "Python Runner"},
+                {"id": "duckdb_sql", "label": "DuckDB SQL"},
                 {"id": "field_lineage_step", "label": "Field Lineage Step"},
                 {"id": "field_lineage_auto", "label": "Field Lineage Auto"},
             ],
@@ -520,7 +526,6 @@ def create_app() -> FastAPI:
                 project_root=settings.project_root,
                 session_id=session_id,
                 sandbox_root_rel_path=settings.sandbox_root_rel_path,
-                cleanup_on_exit=settings.sandbox_cleanup_on_exit,
             )
             assistant_chunks: list[str] = []
             try:

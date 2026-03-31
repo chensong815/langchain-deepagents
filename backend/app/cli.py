@@ -293,7 +293,6 @@ def _create_active_session() -> ActiveSession:
         project_root=settings.project_root,
         session_id=memory_writer.session_id,
         sandbox_root_rel_path=settings.sandbox_root_rel_path,
-        cleanup_on_exit=settings.sandbox_cleanup_on_exit,
     )
     active = ActiveSession(
         thread_id=thread_id,
@@ -352,7 +351,6 @@ def _resume_active_session(target: str) -> ActiveSession:
         project_root=settings.project_root,
         session_id=memory_writer.session_id,
         sandbox_root_rel_path=settings.sandbox_root_rel_path,
-        cleanup_on_exit=settings.sandbox_cleanup_on_exit,
     )
     active = ActiveSession(
         thread_id=memory_writer.thread_id,
@@ -432,12 +430,9 @@ def _choose_startup_resume_target(limit: int = 10) -> str | None:
 
 
 def _close_active_session(session: ActiveSession) -> None:
-    settings = get_settings()
     session.memory_writer.delete_if_empty()
     if session.context_path.exists():
         session.context_path.unlink()
-    if settings.sandbox_cleanup_on_exit:
-        session.sandbox.cleanup()
 
 
 def run_cli(

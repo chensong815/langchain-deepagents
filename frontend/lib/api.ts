@@ -11,6 +11,14 @@ import type {
 
 const DEFAULT_API_PORT = "8000";
 
+function normalizeSandboxQueryPath(filePath: string): string {
+  const normalized = filePath.trim().replace(/\\/g, "/");
+  if (/^\/(?:\.sandbox|backend\/\.sandbox)(?:\/|$)/.test(normalized)) {
+    return normalized.slice(1);
+  }
+  return normalized;
+}
+
 function resolveApiBaseUrl(): string {
   const configuredBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
   if (configuredBaseUrl) {
@@ -30,7 +38,7 @@ export function buildApiUrl(path: string): string {
 }
 
 export function buildSandboxFileUrl(filePath: string): string {
-  return buildApiUrl(`/api/sandbox/file?path=${encodeURIComponent(filePath)}`);
+  return buildApiUrl(`/api/sandbox/file?path=${encodeURIComponent(normalizeSandboxQueryPath(filePath))}`);
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {

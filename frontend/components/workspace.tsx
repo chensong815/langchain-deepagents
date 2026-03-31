@@ -397,7 +397,7 @@ function resolveTurnCaption(turnState: TurnState | null | undefined) {
 const LOCAL_IMAGE_EXTENSION_PATTERN = /\.(?:png|jpe?g|gif|webp|svg)$/i;
 const MARKDOWN_IMAGE_SOURCE_PATTERN = /!\[[^\]]*]\(([^)\n]+)\)/gi;
 const GENERIC_IMAGE_PATH_PATTERN = /(?:^|[\s(`'"])([^\s`<>()]+?\.(?:png|jpe?g|gif|webp|svg))(?=$|[\s)`'",])/gi;
-const SESSION_WORKSPACE_PREFIX = "/.sandbox/session_";
+const SESSION_WORKSPACE_PREFIX = ".sandbox/session_";
 const EMBEDDED_IMAGE_VALUE_PATTERN =
   /((?:https?:\/\/|data:|blob:)[^\s<>()]+|\/[^\s<>()]+?\.(?:png|jpe?g|gif|webp|svg)|(?:\.{0,2}\/|backend\/\.sandbox\/|\.sandbox\/|workspace\/)[^\s<>()]+?\.(?:png|jpe?g|gif|webp|svg)|[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp|svg))/i;
 
@@ -419,13 +419,13 @@ function normalizeLocalAssetPath(value: string) {
 
 function normalizeProjectSandboxPath(value: string) {
   if (value.startsWith("/.sandbox/")) {
-    return value;
+    return value.slice(1);
   }
   if (value.startsWith(".sandbox/")) {
-    return `/${value}`;
+    return value;
   }
   if (value.startsWith("backend/.sandbox/")) {
-    return `/${value.slice("backend/".length)}`;
+    return value.slice("backend/".length);
   }
   return null;
 }
@@ -777,8 +777,6 @@ function resolvePhaseDetail(turnState: TurnState, phase: "routing" | "responding
 function resolveToolDisplayName(label: string) {
   const normalized = label.trim();
   const aliases: Record<string, string> = {
-    weather: "查询天气",
-    knowledge_base: "检索知识库",
     python_code: "执行 Python",
     field_lineage_step: "字段血缘追踪",
     field_lineage_auto: "自动血缘分析",

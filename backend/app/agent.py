@@ -28,18 +28,16 @@ from app.sandbox import SessionSandbox, use_session_sandbox
 from app.serialization import make_json_safe
 from app.skill_catalog import list_skills
 from app.tools import (
-    get_weather,
     query_field_lineage_step,
     query_field_lineage_until_stop,
+    run_duckdb_sql,
     run_python_code,
-    search_knowledge_base,
 )
 
 
 TOOL_REGISTRY = {
-    "weather": get_weather,
-    "knowledge_base": search_knowledge_base,
     "python_code": run_python_code,
+    "duckdb_sql": run_duckdb_sql,
     "field_lineage_step": query_field_lineage_step,
     "field_lineage_auto": query_field_lineage_until_stop,
 }

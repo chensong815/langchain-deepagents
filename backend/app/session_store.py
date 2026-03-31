@@ -34,9 +34,8 @@ from app.skill_catalog import list_skills
 
 
 DEFAULT_TOOL_SWITCHES = {
-    "weather": True,
-    "knowledge_base": True,
     "python_code": True,
+    "duckdb_sql": True,
     "field_lineage_step": True,
     "field_lineage_auto": True,
 }

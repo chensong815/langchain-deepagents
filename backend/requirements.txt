@@ -6,6 +6,7 @@ PyYAML>=6.0.2
 fastapi>=0.115.0
 uvicorn>=0.34.0
 pandas>=2.2.0
+duckdb>=1.0.0
 openpyxl>=3.1.0
 xlrd>=2.0.1
 odfpy>=1.4.1

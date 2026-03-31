@@ -24,9 +24,20 @@ def _serialize_message(message: BaseMessage) -> dict[str, Any]:
     }
 
 
+def _serialize_bytes(value: bytes | bytearray | memoryview) -> str:
+    raw = bytes(value)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", errors="replace")
+
+
 def make_json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return _serialize_bytes(value)
 
     if isinstance(value, (datetime, date)):
         return value.isoformat()
