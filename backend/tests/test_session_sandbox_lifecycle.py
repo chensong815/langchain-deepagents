@@ -31,7 +31,13 @@ if "langchain_core.messages" not in sys.modules:
     sys.modules["langchain_core"] = langchain_core_module
     sys.modules["langchain_core.messages"] = messages_module
 
-from app.sandbox import SessionSandbox, resolve_session_sandbox_path
+from app.sandbox import (
+    SessionSandbox,
+    resolve_agent_workspace_path,
+    resolve_path_in_session_workspace,
+    resolve_session_sandbox_path,
+    use_session_sandbox,
+)
 from app.session_store import SessionStore
 
 
@@ -92,6 +98,34 @@ class SessionSandboxLifecycleTests(unittest.TestCase):
             self.assertFalse(raw_log_path.exists())
             self.assertFalse(memory_path.exists())
             self.assertFalse(sandbox_path.exists())
+
+    def test_agent_workspace_resolution_prefers_current_session_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            sandbox = SessionSandbox(
+                project_root=project_root,
+                session_id="agent-workspace-scope",
+                sandbox_root_rel_path=".sandbox",
+                cleanup_on_exit=False,
+            )
+            project_file = project_root / "secret.txt"
+            project_file.write_text("host-secret", encoding="utf-8")
+
+            with use_session_sandbox(sandbox):
+                resolved_workspace = resolve_agent_workspace_path(project_root, ".sandbox")
+                self.assertEqual(resolved_workspace, sandbox.workspace_path)
+                self.assertEqual(
+                    resolve_path_in_session_workspace("notes.txt", sandbox=sandbox).resolve(),
+                    (sandbox.workspace_path / "notes.txt").resolve(),
+                )
+                with self.assertRaises(ValueError):
+                    resolve_path_in_session_workspace(str(project_file.resolve()), sandbox=sandbox)
+
+    def test_agent_workspace_resolution_requires_active_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            with self.assertRaises(RuntimeError):
+                resolve_agent_workspace_path(project_root, ".sandbox")
 
 
 if __name__ == "__main__":

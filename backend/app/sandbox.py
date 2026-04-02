@@ -12,7 +12,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from deepagents.backends import FilesystemBackend
 
 
 _CURRENT_SESSION_SANDBOX: ContextVar["SessionSandbox | None"] = ContextVar("current_session_sandbox", default=None)
@@ -710,6 +714,33 @@ def get_current_session_sandbox() -> SessionSandbox:
     if sandbox is None:
         raise RuntimeError("No active session sandbox is bound to the current agent call.")
     return sandbox
+
+
+def resolve_agent_workspace_path(project_root: Path, sandbox_root_rel_path: str) -> Path:
+    del project_root, sandbox_root_rel_path
+    sandbox = get_current_session_sandbox()
+    sandbox.workspace_path.mkdir(parents=True, exist_ok=True)
+    return sandbox.workspace_path
+
+
+def create_session_workspace_backend(project_root: Path, sandbox_root_rel_path: str) -> "FilesystemBackend":
+    from deepagents.backends import FilesystemBackend
+
+    return FilesystemBackend(
+        root_dir=resolve_agent_workspace_path(project_root, sandbox_root_rel_path),
+        virtual_mode=True,
+    )
+
+
+def resolve_path_in_session_workspace(raw_path: str, *, sandbox: SessionSandbox | None = None) -> Path:
+    active_sandbox = sandbox or get_current_session_sandbox()
+    workspace_root = active_sandbox.workspace_path.resolve()
+    expanded = Path(raw_path).expanduser()
+    candidate = expanded if expanded.is_absolute() else workspace_root / expanded
+    resolved = candidate.resolve()
+    if resolved != workspace_root and not resolved.is_relative_to(workspace_root):
+        raise ValueError(f"路径必须位于当前会话 workspace 内：{raw_path}")
+    return resolved
 
 
 @contextmanager

@@ -58,7 +58,10 @@ class QueryFieldLineageUntilStopInput(QueryFieldLineageStepInput):
 class RunDuckDBSQLInput(BaseModel):
     """DuckDB SQL 工具入参。"""
 
-    db_path: str = Field(default="", description="DuckDB 数据库文件路径，支持相对路径、绝对路径或 :memory:；留空时回退到环境变量 DB_PATH/db_path")
+    db_path: str = Field(
+        default="",
+        description="DuckDB 数据库文件路径，支持相对路径、绝对路径或 :memory:；留空时回退到环境变量 DB_PATH/db_path",
+    )
     sql: str = Field(description="需要执行的单条只读 SQL，仅允许 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/VALUES")
     max_rows: int = Field(default=DEFAULT_DUCKDB_MAX_ROWS, ge=1, le=MAX_DUCKDB_MAX_ROWS, description="结果预览行数上限")
 
@@ -240,13 +243,8 @@ def _build_sql_summary_text(columns: list[str], total_rows: int, preview_rows: i
 
 
 def _resolve_sql_export_dir() -> Path:
-    try:
-        sandbox = get_current_session_sandbox()
-    except RuntimeError:
-        sandbox = None
-
-    base_dir = sandbox.workspace_path if sandbox is not None else Path.cwd()
-    export_dir = base_dir / "sql_exports"
+    sandbox = get_current_session_sandbox()
+    export_dir = sandbox.workspace_path / "sql_exports"
     export_dir.mkdir(parents=True, exist_ok=True)
     return export_dir
 

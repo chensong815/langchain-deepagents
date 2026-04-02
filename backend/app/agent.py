@@ -24,7 +24,7 @@ from app.config import get_settings
 from app.intent_router import route_with_skill_intent
 from app.reloading_memory import ReloadingMemoryMiddleware
 from app.reloading_skills import ReloadingSkillsMiddleware
-from app.sandbox import SessionSandbox, use_session_sandbox
+from app.sandbox import SessionSandbox, create_session_workspace_backend, use_session_sandbox
 from app.serialization import make_json_safe
 from app.skill_catalog import list_skills
 from app.tools import (
@@ -934,7 +934,7 @@ def get_agent(
         model=resolved_model_name,
         temperature=settings.temperature,
     )
-    backend = FilesystemBackend(root_dir=settings.project_root, virtual_mode=True)
+    project_backend = FilesystemBackend(root_dir=settings.project_root, virtual_mode=True)
 
     loaded_skills = list_skills(settings.project_root, resolved_skill_sources)
     if resolved_allowed_skill_names is not None:
@@ -954,14 +954,17 @@ def get_agent(
         tools=[TOOL_REGISTRY[tool_id] for tool_id in resolved_tool_ids],
         system_prompt=resolved_system_prompt,
         middleware=[
-            ReloadingMemoryMiddleware(backend=backend, sources=list(resolved_memory_sources)),
+            ReloadingMemoryMiddleware(backend=project_backend, sources=list(resolved_memory_sources)),
             ReloadingSkillsMiddleware(
-                backend=backend,
+                backend=project_backend,
                 sources=list(resolved_skill_sources),
                 allowed_skill_names=resolved_allowed_skill_names,
             ),
         ],
-        backend=backend,
+        backend=lambda _runtime: create_session_workspace_backend(
+            settings.project_root,
+            settings.sandbox_root_rel_path,
+        ),
         checkpointer=InMemorySaver(),
         name="deepagent-skills-backend",
     )

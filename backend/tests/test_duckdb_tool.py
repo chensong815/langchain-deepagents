@@ -138,6 +138,30 @@ class DuckDBToolTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["resolved_db_path"], ":memory:")
 
+    def test_runner_allows_database_path_outside_session_workspace(self) -> None:
+        rows = [(1,)]
+        columns = ["id"]
+        fake_connection = _FakeConnection(rows, columns)
+        fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            fake_sandbox = SimpleNamespace(workspace_path=temp_root / "workspace")
+            fake_sandbox.workspace_path.mkdir(parents=True, exist_ok=True)
+            outside_db = temp_root / "outside.duckdb"
+            outside_db.write_text("not-a-real-db", encoding="utf-8")
+
+            with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+                with patch("app.tools.get_current_session_sandbox", return_value=fake_sandbox):
+                    runner = DuckDBRunner(db_path=str(outside_db), sql_limit_rows=10)
+                    ok, digest, preview, error = runner.execute("SELECT 1", meta={})
+
+        self.assertTrue(ok)
+        self.assertIsNone(error)
+        self.assertEqual(digest["db_path"], str(outside_db.resolve()))
+        self.assertTrue(str(digest["result_file_path"]).startswith(str(fake_sandbox.workspace_path.resolve())))
+        self.assertIn("共1行数据", preview or "")
+
 
 if __name__ == "__main__":
     unittest.main()
