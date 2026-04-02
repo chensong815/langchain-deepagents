@@ -42,6 +42,16 @@ export type WorkingArtifact = {
   description: string;
 };
 
+export type CsvPreviewPayload = {
+  path: string;
+  name: string;
+  columns: string[];
+  rows: string[][];
+  column_count: number;
+  displayed_rows: number;
+  truncated: boolean;
+};
+
 export type WorkingMemory = {
   active_skill: string | null;
   recent_tools: string[];

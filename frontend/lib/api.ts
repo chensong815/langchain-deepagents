@@ -1,4 +1,5 @@
 import type {
+  CsvPreviewPayload,
   FileCard,
   OptionsPayload,
   SessionRecord,
@@ -62,6 +63,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   async health(): Promise<{ status: string }> {
     return apiFetch("/api/health");
+  },
+  async getSandboxCsvPreview(path: string, limit = 50): Promise<CsvPreviewPayload> {
+    return apiFetch(
+      `/api/sandbox/csv-preview?path=${encodeURIComponent(normalizeSandboxQueryPath(path))}&limit=${limit}`,
+    );
   },
   async options(): Promise<OptionsPayload> {
     return apiFetch("/api/options");

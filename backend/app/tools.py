@@ -9,15 +9,18 @@ import json
 import os
 import re
 import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib import error, request
+from uuid import uuid4
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from app.config import get_settings
+from app.serialization import make_json_safe
 from app.sandbox import get_current_session_sandbox
 
 
@@ -187,6 +190,82 @@ def _render_sql_preview_csv(columns: list[str], rows: list[tuple[Any, ...]]) -> 
     return buffer.getvalue() or "(查询执行成功，无结果集)\n"
 
 
+def _stringify_sql_value(value: Any) -> str:
+    normalized = make_json_safe(value)
+    if normalized is None:
+        return "NULL"
+    if isinstance(normalized, (dict, list)):
+        try:
+            return json.dumps(normalized, ensure_ascii=False)
+        except Exception:
+            return str(normalized)
+    return str(normalized)
+
+
+def _escape_markdown_table_cell(value: Any) -> str:
+    return _stringify_sql_value(value).replace("|", "\\|").replace("\n", "<br/>")
+
+
+def _build_sql_preview_records(columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
+    if not columns:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        record = {column: make_json_safe(row[index]) if index < len(row) else None for index, column in enumerate(columns)}
+        records.append(record)
+    return records
+
+
+def _render_sql_preview_markdown(columns: list[str], rows: list[tuple[Any, ...]]) -> str:
+    if not columns:
+        return "(查询执行成功，无结果集)"
+
+    header = "| " + " | ".join(_escape_markdown_table_cell(column) for column in columns) + " |"
+    separator = "| " + " | ".join("---" for _ in columns) + " |"
+    body = [
+        "| " + " | ".join(_escape_markdown_table_cell(row[index] if index < len(row) else None) for index, _ in enumerate(columns)) + " |"
+        for row in rows
+    ]
+    return "\n".join([header, separator, *body])
+
+
+def _build_sql_summary_text(columns: list[str], total_rows: int, preview_rows: int) -> str:
+    if not columns:
+        return "返回结果：查询执行成功，无结果集。"
+
+    if total_rows > preview_rows:
+        return f"返回结果：共{total_rows}行，{len(columns)}个字段，预览如下（仅展示前{preview_rows}行）："
+    return f"返回结果：共{total_rows}行，{len(columns)}个字段，预览如下："
+
+
+def _resolve_sql_export_dir() -> Path:
+    try:
+        sandbox = get_current_session_sandbox()
+    except RuntimeError:
+        sandbox = None
+
+    base_dir = sandbox.workspace_path if sandbox is not None else Path.cwd()
+    export_dir = base_dir / "sql_exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    return export_dir
+
+
+def _persist_sql_result_csv(columns: list[str], rows: list[tuple[Any, ...]], sql: str) -> str | None:
+    if not columns:
+        return None
+
+    keyword_match = re.match(r"([a-zA-Z]+)", _strip_sql_comments(sql))
+    prefix = (keyword_match.group(1).lower() if keyword_match else "query")[:16]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    export_path = _resolve_sql_export_dir() / f"{prefix}_result_{timestamp}_{uuid4().hex[:8]}.csv"
+    with export_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(columns)
+        writer.writerows(rows)
+    return str(export_path.resolve())
+
+
 def _is_numberish(value: Any) -> bool:
     try:
         float(value)
@@ -314,6 +393,10 @@ class DuckDBRunner:
             digest = _build_sql_digest(columns, rows)
             digest["db_path"] = resolved_db_path
             digest["preview_rows"] = len(preview_rows)
+            digest["preview_records"] = _build_sql_preview_records(columns, preview_rows)
+            digest["preview_markdown"] = _render_sql_preview_markdown(columns, preview_rows)
+            digest["summary_text"] = _build_sql_summary_text(columns, len(rows), len(preview_rows))
+            digest["result_file_path"] = _persist_sql_result_csv(columns, rows, sql)
             return True, digest, sql_result_output, None
         except Exception:
             return False, {}, None, f"SQL执行异常：{traceback.format_exc()}"
@@ -485,7 +568,7 @@ def run_python_code(code: str) -> str:
 
 @tool(args_schema=RunDuckDBSQLInput)
 def run_duckdb_sql(db_path: str = "", sql: str = "", max_rows: int = DEFAULT_DUCKDB_MAX_ROWS) -> str:
-    """执行单条只读 DuckDB SQL，并返回摘要与 CSV 预览。"""
+    """执行单条只读 DuckDB SQL，并返回 JSON 结果，包含摘要、结构化预览与可直接展示的 summary_text。"""
     runner = DuckDBRunner(db_path=db_path, sql_limit_rows=max_rows)
     ok, digest, preview, error = runner.execute(sql, meta={})
     payload = {
@@ -493,6 +576,11 @@ def run_duckdb_sql(db_path: str = "", sql: str = "", max_rows: int = DEFAULT_DUC
         "db_path": db_path,
         "resolved_db_path": digest.get("db_path") if digest else None,
         "sql": sql,
+        "summary_text": digest.get("summary_text") if digest else None,
+        "file_path": digest.get("result_file_path") if digest else None,
+        "result_file_path": digest.get("result_file_path") if digest else None,
+        "preview_records": digest.get("preview_records") if digest else None,
+        "preview_markdown": digest.get("preview_markdown") if digest else None,
         "digest": digest,
         "preview": preview,
         "error": error,

@@ -46,6 +46,7 @@ import { DebugPanel } from "@/components/workspace/debug-panel";
 import { SkillsPanel } from "@/components/workspace/skills-panel";
 import type {
   ChatMessage,
+  CsvPreviewPayload,
   FileCard,
   OptionsPayload,
   RawMessage,
@@ -55,6 +56,7 @@ import type {
   SkillFileCard,
   StreamEvent,
   TurnState,
+  WorkingArtifact,
   WorkspacePage,
 } from "@/lib/types";
 
@@ -62,6 +64,47 @@ const SKILL_CARDS_MIN_WIDTH = 320;
 const SKILL_CARDS_MAX_WIDTH = 620;
 const SKILL_FILES_MIN_WIDTH = 240;
 const SKILL_FILES_MAX_WIDTH = 520;
+const INLINE_CSV_PREVIEW_ROWS = 12;
+const INLINE_CSV_PREVIEW_MAX_FILES = 2;
+const csvPreviewCache = new Map<string, CsvPreviewPayload>();
+const csvPreviewErrorCache = new Map<string, string>();
+const csvPreviewRequestCache = new Map<string, Promise<CsvPreviewPayload>>();
+
+function csvPreviewCacheKey(path: string, limit: number) {
+  return `${path}::${limit}`;
+}
+
+async function loadCachedCsvPreview(path: string, limit: number) {
+  const cacheKey = csvPreviewCacheKey(path, limit);
+  const cached = csvPreviewCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const pending = csvPreviewRequestCache.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const request = api
+    .getSandboxCsvPreview(path, limit)
+    .then((payload) => {
+      csvPreviewCache.set(cacheKey, payload);
+      csvPreviewErrorCache.delete(cacheKey);
+      return payload;
+    })
+    .catch((error) => {
+      const message = getErrorMessage(error);
+      csvPreviewErrorCache.set(cacheKey, message);
+      throw new Error(message);
+    })
+    .finally(() => {
+      csvPreviewRequestCache.delete(cacheKey);
+    });
+
+  csvPreviewRequestCache.set(cacheKey, request);
+  return request;
+}
 
 function formatDate(value: string | number) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -521,6 +564,7 @@ const MANAGED_PROMPTS = [
 function MessageBubble({
   message,
   sessionId,
+  artifacts,
   onCopy,
   copied,
   onEdit,
@@ -532,6 +576,7 @@ function MessageBubble({
 }: {
   message: ChatMessage;
   sessionId?: string;
+  artifacts?: WorkingArtifact[];
   onCopy: (value: string) => void;
   copied?: boolean;
   onEdit?: () => void;
@@ -552,6 +597,25 @@ function MessageBubble({
     () => (isUser ? [] : extractImagePathsFromContent(message.content, sessionId)),
     [isUser, message.content, sessionId],
   );
+  const allCsvArtifacts = useMemo(() => {
+    if (isUser) {
+      return [];
+    }
+
+    const collected: WorkingArtifact[] = [];
+    const seenPaths = new Set<string>();
+    for (const artifact of artifacts ?? []) {
+      const normalizedPath = artifact.path.trim();
+      if (!normalizedPath || !isCsvArtifactPath(normalizedPath) || seenPaths.has(normalizedPath)) {
+        continue;
+      }
+      seenPaths.add(normalizedPath);
+      collected.push(artifact);
+    }
+    return collected;
+  }, [artifacts, isUser]);
+  const csvArtifacts = allCsvArtifacts.slice(0, INLINE_CSV_PREVIEW_MAX_FILES);
+  const hiddenCsvArtifactCount = Math.max(0, allCsvArtifacts.length - csvArtifacts.length);
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -654,6 +718,18 @@ function MessageBubble({
                 })}
               </div>
             ) : null}
+            {csvArtifacts.length > 0 ? (
+              <div className="space-y-3">
+                {csvArtifacts.map((artifact) => (
+                  <InlineCsvArtifactPreview key={artifact.path} artifact={artifact} />
+                ))}
+                {hiddenCsvArtifactCount > 0 ? (
+                  <p className="text-[11px] leading-5 text-[var(--muted)]">
+                    其余 {hiddenCsvArtifactCount} 个 CSV 产物仍可在右侧 Artifacts 面板查看。
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
       </article>
@@ -720,6 +796,7 @@ type TurnView = {
   id: string;
   userMessage: ChatMessage;
   assistantMessage: ChatMessage | null;
+  artifacts: WorkingArtifact[];
   thinkingSteps: TimelineStep[];
   thinkingState: TurnState;
   isStreaming: boolean;
@@ -731,6 +808,84 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function readArtifactDescription(toolName: string, label: unknown) {
+  const normalizedLabel = typeof label === "string" ? label.trim() : "";
+  if (normalizedLabel) {
+    return `来自 ${toolName} 的产物（${normalizedLabel}）`;
+  }
+  return `来自 ${toolName} 的产物`;
+}
+
+function appendArtifactCandidate(
+  target: WorkingArtifact[],
+  seenPaths: Set<string>,
+  path: unknown,
+  description: string,
+) {
+  if (typeof path !== "string") {
+    return;
+  }
+
+  const normalizedPath = path.trim();
+  if (!normalizedPath || seenPaths.has(normalizedPath)) {
+    return;
+  }
+
+  seenPaths.add(normalizedPath);
+  target.push({ path: normalizedPath, description });
+}
+
+function collectArtifactsFromArtifactList(
+  source: unknown,
+  target: WorkingArtifact[],
+  seenPaths: Set<string>,
+  toolName: string,
+) {
+  if (!Array.isArray(source)) {
+    return;
+  }
+
+  for (const item of source) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+    appendArtifactCandidate(target, seenPaths, record.path, readArtifactDescription(toolName, record.label));
+  }
+}
+
+function collectArtifactsFromPayloadFields(
+  source: Record<string, unknown> | null,
+  target: WorkingArtifact[],
+  seenPaths: Set<string>,
+  toolName: string,
+) {
+  if (!source) {
+    return;
+  }
+
+  const description = readArtifactDescription(toolName, null);
+  appendArtifactCandidate(target, seenPaths, source.result_file_path, description);
+  appendArtifactCandidate(target, seenPaths, source.file_path, description);
+  appendArtifactCandidate(target, seenPaths, source.artifact_path, description);
+}
+
+function collectToolArtifacts(payload: Record<string, unknown> | null) {
+  const toolName = typeof payload?.tool === "string" && payload.tool.trim() ? payload.tool.trim() : "tool";
+  const artifacts: WorkingArtifact[] = [];
+  const seenPaths = new Set<string>();
+
+  collectArtifactsFromArtifactList(payload?.artifacts, artifacts, seenPaths, toolName);
+
+  const toolMessage = asRecord(payload?.tool_message);
+  collectArtifactsFromArtifactList(toolMessage?.artifact_paths, artifacts, seenPaths, toolName);
+
+  collectArtifactsFromPayloadFields(asRecord(payload?.output_json), artifacts, seenPaths, toolName);
+  collectArtifactsFromPayloadFields(asRecord(payload?.output), artifacts, seenPaths, toolName);
+
+  return artifacts;
 }
 
 function resolveToolStepLabel(tool: unknown, toolCallId?: string) {
@@ -1324,6 +1479,36 @@ function buildTimelineTurns(rawMessages: RawMessage[]): TimelineStep[][] {
   return turns;
 }
 
+function buildArtifactTurns(rawMessages: RawMessage[]): WorkingArtifact[][] {
+  const turns: WorkingArtifact[][] = [];
+  let currentTurn: WorkingArtifact[] | null = null;
+  let currentSeenPaths = new Set<string>();
+
+  for (const rawMessage of rawMessages) {
+    if (rawMessage.kind === "user") {
+      currentTurn = [];
+      currentSeenPaths = new Set<string>();
+      turns.push(currentTurn);
+      continue;
+    }
+
+    if (!currentTurn || rawMessage.kind !== "tool_end") {
+      continue;
+    }
+
+    const artifacts = collectToolArtifacts(asRecord(rawMessage.payload));
+    for (const artifact of artifacts) {
+      if (currentSeenPaths.has(artifact.path)) {
+        continue;
+      }
+      currentSeenPaths.add(artifact.path);
+      currentTurn.push(artifact);
+    }
+  }
+
+  return turns;
+}
+
 function getLatestTurnRawMessages(rawMessages: RawMessage[]) {
   if (rawMessages.length === 0) {
     return rawMessages;
@@ -1609,7 +1794,9 @@ function mergeStreamEventIntoSteps(currentSteps: TimelineStep[], event: StreamEv
 function buildTurnViews({
   messages,
   historicalTimelineTurns,
+  historicalArtifactTurns,
   streamSteps,
+  streamArtifactTurns,
   streamTurnState,
   activeTurnState,
   streaming,
@@ -1617,7 +1804,9 @@ function buildTurnViews({
 }: {
   messages: ChatMessage[];
   historicalTimelineTurns: TimelineStep[][];
+  historicalArtifactTurns: WorkingArtifact[][];
   streamSteps: TimelineStep[];
+  streamArtifactTurns: WorkingArtifact[][];
   streamTurnState: TurnState | null;
   activeTurnState: TurnState;
   streaming: boolean;
@@ -1635,6 +1824,7 @@ function buildTurnViews({
         id: `turn-${message.id}`,
         userMessage: message,
         assistantMessage: null,
+        artifacts: isStreamingTurn ? streamArtifactTurns[0] ?? [] : historicalArtifactTurns[userTurnIndex] ?? [],
         thinkingSteps: isStreamingTurn ? streamSteps : historicalTimelineTurns[userTurnIndex] ?? [],
         thinkingState: isStreamingTurn
           ? normalizeTurnState(streamTurnState ?? activeTurnState)
@@ -2005,6 +2195,139 @@ function ThinkingCard({ turn }: { turn: TurnView }) {
         ) : null}
       </div>
     </details>
+  );
+}
+
+function CsvPreviewTable({ preview }: { preview: CsvPreviewPayload }) {
+  return (
+    <table className="min-w-full border-collapse text-left text-[13px]">
+      <thead className="sticky top-0 bg-[color:color-mix(in_srgb,var(--panel)_96%,white_4%)]">
+        <tr>
+          <th className="border-b border-[var(--line)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+            #
+          </th>
+          {preview.columns.map((column) => (
+            <th
+              key={column}
+              className="border-b border-[var(--line)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]"
+            >
+              {column}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {preview.rows.map((row, rowIndex) => (
+          <tr
+            key={`${rowIndex}-${row.join("|")}`}
+            className="align-top odd:bg-[color:color-mix(in_srgb,var(--background)_88%,var(--panel)_12%)]"
+          >
+            <td className="border-b border-[var(--line)] px-3 py-2 text-[11px] text-[var(--muted)]">{rowIndex + 1}</td>
+            {preview.columns.map((_, columnIndex) => (
+              <td
+                key={`${rowIndex}-${columnIndex}`}
+                className="border-b border-[var(--line)] px-3 py-2 leading-6 text-[var(--foreground)]"
+              >
+                <div className="min-w-[8rem] whitespace-pre-wrap break-words">{row[columnIndex] ?? ""}</div>
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function InlineCsvArtifactPreview({ artifact }: { artifact: WorkingArtifact }) {
+  const cacheKey = csvPreviewCacheKey(artifact.path, INLINE_CSV_PREVIEW_ROWS);
+  const cachedPreview = csvPreviewCache.get(cacheKey) ?? null;
+  const cachedError = csvPreviewErrorCache.get(cacheKey) ?? "";
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<CsvPreviewPayload | null>(() => cachedPreview);
+  const [error, setError] = useState(() => cachedError);
+  const [loading, setLoading] = useState(false);
+  const fileUrl = buildSandboxFileUrl(artifact.path);
+  const resolvedPreview = preview ?? cachedPreview;
+  const resolvedError = error || cachedError;
+
+  async function togglePreview() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+
+    setOpen(true);
+    if (resolvedPreview || resolvedError) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = await loadCachedCsvPreview(artifact.path, INLINE_CSV_PREVIEW_ROWS);
+      startTransition(() => {
+        setPreview(payload);
+        setError("");
+        setLoading(false);
+      });
+    } catch (loadError) {
+      setPreview(null);
+      setError(getErrorMessage(loadError));
+      setLoading(false);
+    }
+  }
+
+  return (
+    <article className="rounded-[1.25rem] border border-[var(--line)] bg-[color:color-mix(in_srgb,var(--panel)_92%,white_8%)] px-3.5 py-3.5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">CSV Preview</p>
+          <p className="mt-1 text-[14px] font-medium text-[var(--foreground)]">{artifactFileName(artifact.path)}</p>
+          <p className="mt-1 break-all text-[11px] leading-5 text-[var(--muted)]">{artifact.path}</p>
+          {artifact.description ? (
+            <p className="mt-1 text-[12px] leading-5 text-[var(--muted)]">{artifact.description}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="status-pill">CSV</span>
+          <button className="action-button !px-3 !py-2 !text-[11px]" onClick={() => void togglePreview()} type="button">
+            {open ? "收起预览" : "预览 CSV"}
+          </button>
+          <a className="ghost-button !px-3 !py-2 !text-[11px]" href={fileUrl} rel="noreferrer" target="_blank">
+            打开文件
+          </a>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="mt-3">
+          {loading ? (
+            <div className="flex min-h-24 items-center justify-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--muted)]">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              正在加载 CSV 预览
+            </div>
+          ) : resolvedError ? (
+            <div className="rounded-2xl border border-amber-300/45 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-950">
+              {resolvedError}
+            </div>
+          ) : resolvedPreview && resolvedPreview.columns.length > 0 ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2 text-[11px] text-[var(--muted)]">
+                <span className="status-pill">{resolvedPreview.column_count} 列</span>
+                <span className="status-pill">{resolvedPreview.displayed_rows} 行预览</span>
+                {resolvedPreview.truncated ? <span className="status-pill">仅展示前 {INLINE_CSV_PREVIEW_ROWS} 行</span> : null}
+              </div>
+              <div className="overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--background)]">
+                <CsvPreviewTable preview={resolvedPreview} />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm leading-6 text-[var(--muted)]">
+              CSV 文件为空，暂无可展示内容。
+            </div>
+          )}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -3014,6 +3337,134 @@ function DebugTraceExplorer({ rawMessages }: { rawMessages: RawMessage[] }) {
   );
 }
 
+function isCsvArtifactPath(path: string) {
+  return /\.csv$/i.test(path.trim());
+}
+
+function artifactFileName(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
+function ArtifactCard({
+  artifact,
+  onPreviewCsv,
+}: {
+  artifact: WorkingArtifact;
+  onPreviewCsv: (artifact: WorkingArtifact) => void;
+}) {
+  const fileUrl = buildSandboxFileUrl(artifact.path);
+  const csvArtifact = isCsvArtifactPath(artifact.path);
+
+  return (
+    <article className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[12px] font-medium text-[var(--foreground)]">{artifactFileName(artifact.path)}</p>
+          <p className="mt-1 break-all text-[11px] leading-5 text-[var(--muted)]">{artifact.path}</p>
+          <p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">{artifact.description || "artifact"}</p>
+        </div>
+        {csvArtifact ? <span className="status-pill shrink-0">CSV</span> : null}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {csvArtifact ? (
+          <button className="action-button !px-3 !py-2 !text-[11px]" onClick={() => onPreviewCsv(artifact)} type="button">
+            <Maximize2 className="h-3.5 w-3.5" />
+            预览 CSV
+          </button>
+        ) : null}
+        <a
+          className="ghost-button !px-3 !py-2 !text-[11px]"
+          href={fileUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          打开文件
+        </a>
+      </div>
+    </article>
+  );
+}
+
+function CsvPreviewModal({
+  artifact,
+  preview,
+  loading,
+  error,
+  onClose,
+}: {
+  artifact: WorkingArtifact | null;
+  preview: CsvPreviewPayload | null;
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+}) {
+  if (!artifact) {
+    return null;
+  }
+
+  const fileUrl = buildSandboxFileUrl(artifact.path);
+  const title = preview?.name || artifactFileName(artifact.path);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(12,10,8,0.16)] px-4 py-8"
+      onClick={onClose}
+    >
+      <div
+        className="panel mt-[4.5rem] flex max-h-[78vh] w-full max-w-6xl flex-col overflow-hidden border-[color:color-mix(in_srgb,var(--accent)_18%,var(--line))] shadow-[0_36px_80px_-46px_rgba(0,0,0,0.38)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="shrink-0 border-b border-[var(--line)] px-6 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">CSV Preview</p>
+              <p className="mt-1 truncate text-lg font-semibold text-[var(--foreground)]">{title}</p>
+              <p className="mt-1 break-all text-sm text-[var(--muted)]">{artifact.path}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a className="ghost-button !px-3 !py-2 !text-[11px]" href={fileUrl} rel="noreferrer" target="_blank">
+                打开文件
+              </a>
+              <button className="icon-button shrink-0" onClick={onClose} type="button">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          {preview ? (
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--muted)]">
+              <span className="status-pill">{preview.column_count} 列</span>
+              <span className="status-pill">{preview.displayed_rows} 行预览</span>
+              {preview.truncated ? <span className="status-pill">仅展示前 100 行</span> : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+          {loading ? (
+            <div className="flex h-full min-h-48 items-center justify-center gap-3 text-sm text-[var(--muted)]">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              正在加载 CSV 预览
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-amber-300/45 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-950">
+              {error}
+            </div>
+          ) : preview && preview.columns.length > 0 ? (
+            <div className="overflow-auto rounded-2xl border border-[var(--line)] bg-[var(--background)]">
+              <CsvPreviewTable preview={preview} />
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-4 py-3 text-sm leading-6 text-[var(--muted)]">
+              CSV 文件为空，暂无可展示内容。
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionInsightPanel({
   session,
   turnState,
@@ -3028,120 +3479,167 @@ function SessionInsightPanel({
   const workingMemory = session?.working_memory;
   const retrievedContext = session?.retrieved_context ?? [];
   const currentTurnRawMessages = useMemo(() => getLatestTurnRawMessages(rawMessages), [rawMessages]);
+  const [previewArtifact, setPreviewArtifact] = useState<WorkingArtifact | null>(null);
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewPayload | null>(null);
+  const [csvPreviewError, setCsvPreviewError] = useState("");
+  const [csvPreviewLoading, setCsvPreviewLoading] = useState(false);
+  const csvPreviewRequestRef = useRef(0);
+
+  async function openCsvPreview(artifact: WorkingArtifact) {
+    const requestId = csvPreviewRequestRef.current + 1;
+    csvPreviewRequestRef.current = requestId;
+    setPreviewArtifact(artifact);
+    setCsvPreview(null);
+    setCsvPreviewError("");
+    setCsvPreviewLoading(true);
+
+    try {
+      const payload = await api.getSandboxCsvPreview(artifact.path, 100);
+      if (csvPreviewRequestRef.current !== requestId) {
+        return;
+      }
+      startTransition(() => {
+        setCsvPreview(payload);
+        setCsvPreviewLoading(false);
+      });
+    } catch (error) {
+      if (csvPreviewRequestRef.current !== requestId) {
+        return;
+      }
+      setCsvPreview(null);
+      setCsvPreviewLoading(false);
+      setCsvPreviewError(getErrorMessage(error));
+    }
+  }
+
+  function closeCsvPreview() {
+    csvPreviewRequestRef.current += 1;
+    setPreviewArtifact(null);
+    setCsvPreview(null);
+    setCsvPreviewError("");
+    setCsvPreviewLoading(false);
+  }
 
   return (
-    <aside className="panel sticky top-[5.25rem] hidden max-h-[calc(100vh-6rem)] w-[320px] shrink-0 self-start xl:flex xl:flex-col 2xl:w-[340px]">
-      <div className="border-b border-[var(--line)] px-4 py-3">
-        <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Session Workspace</p>
-        <p className="text-sm">把当前轮状态、会话记忆和上下文命中放在同一侧栏里。</p>
-      </div>
-      <div className="space-y-4 overflow-y-auto p-4">
-        <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Current Turn</p>
-              <p className="text-sm text-[var(--foreground)]">{resolveTurnStatusLabel(turnState)}</p>
-            </div>
-            <span className="status-pill">{turnState.tool_count} tools</span>
-          </div>
-          <p className="text-[13px] leading-6 text-[var(--muted)]">{resolveTurnCaption(turnState)}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {turnState.selected_skill ? <span className="status-pill">Skill · {turnState.selected_skill}</span> : null}
-            {turnState.active_tool ? <span className="status-pill">Tool · {turnState.active_tool}</span> : null}
-            {turnState.started_at ? <span className="status-pill">开始于 {formatDate(turnState.started_at)}</span> : null}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-          <div className="mb-2">
-            <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Working Memory</p>
-            <p className="text-sm text-[var(--foreground)]">当前目标、待办和产物</p>
-          </div>
-          <div className="space-y-3 text-[13px]">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Current Goal</p>
-              <p className="mt-1 leading-6 text-[var(--foreground)]">{workingMemory?.current_goal || "暂无"}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Open Loops</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {(workingMemory?.open_loops ?? []).length > 0 ? (
-                  workingMemory?.open_loops.map((item) => <span key={item} className="status-pill !rounded-2xl">{item}</span>)
-                ) : (
-                  <span className="text-[var(--muted)]">暂无</span>
-                )}
+    <Fragment>
+      <aside className="panel sticky top-[5.25rem] hidden max-h-[calc(100vh-6rem)] w-[320px] shrink-0 self-start xl:flex xl:flex-col 2xl:w-[340px]">
+        <div className="border-b border-[var(--line)] px-4 py-3">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--muted)]">Session Workspace</p>
+          <p className="text-sm">把当前轮状态、会话记忆和上下文命中放在同一侧栏里。</p>
+        </div>
+        <div className="space-y-4 overflow-y-auto p-4">
+          <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Current Turn</p>
+                <p className="text-sm text-[var(--foreground)]">{resolveTurnStatusLabel(turnState)}</p>
               </div>
+              <span className="status-pill">{turnState.tool_count} tools</span>
             </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Recent Tools</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {(workingMemory?.recent_tools ?? []).length > 0 ? (
-                  workingMemory?.recent_tools.map((item) => <span key={item} className="status-pill">{item}</span>)
-                ) : (
-                  <span className="text-[var(--muted)]">暂无</span>
-                )}
-              </div>
+            <p className="text-[13px] leading-6 text-[var(--muted)]">{resolveTurnCaption(turnState)}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {turnState.selected_skill ? <span className="status-pill">Skill · {turnState.selected_skill}</span> : null}
+              {turnState.active_tool ? <span className="status-pill">Tool · {turnState.active_tool}</span> : null}
+              {turnState.started_at ? <span className="status-pill">开始于 {formatDate(turnState.started_at)}</span> : null}
             </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Artifacts</p>
-              <div className="mt-1 space-y-2">
-                {(workingMemory?.artifacts ?? []).length > 0 ? (
-                  workingMemory?.artifacts.map((artifact) => (
-                    <article key={artifact.path} className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-3 py-2">
-                      <p className="break-all text-[12px] font-medium text-[var(--foreground)]">{artifact.path}</p>
-                      <p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">{artifact.description || "artifact"}</p>
-                    </article>
-                  ))
-                ) : (
-                  <span className="text-[var(--muted)]">暂无</span>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
-          <div className="mb-2">
-            <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Retrieved Context</p>
-            <p className="text-sm text-[var(--foreground)]">每轮检索命中的上下文片段</p>
-          </div>
-          <div className="space-y-2.5">
-            {retrievedContext.length > 0 ? (
-              retrievedContext.map((item) => (
-                <article key={`${item.source}-${item.title}`} className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-3 py-2">
-                  <div className="flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]">
-                    <span>{item.kind}</span>
-                    <span>{item.score.toFixed(2)}</span>
-                  </div>
-                  <p className="mt-1 text-[12px] font-medium text-[var(--foreground)]">{item.title}</p>
-                  <p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">{item.snippet}</p>
-                </article>
-              ))
-            ) : (
-              <p className="text-[13px] text-[var(--muted)]">暂无命中。</p>
-            )}
-          </div>
-        </section>
-
-        {debugOpen ? (
-          <>
-            <DebugTraceExplorer rawMessages={rawMessages} />
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Debug Feed</p>
-                  <p className="text-sm text-[var(--foreground)]">当前这一轮的原始事件流，按实际顺序保留。</p>
+          <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+            <div className="mb-2">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Working Memory</p>
+              <p className="text-sm text-[var(--foreground)]">当前目标、待办和产物</p>
+            </div>
+            <div className="space-y-3 text-[13px]">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Current Goal</p>
+                <p className="mt-1 leading-6 text-[var(--foreground)]">{workingMemory?.current_goal || "暂无"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Open Loops</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {(workingMemory?.open_loops ?? []).length > 0 ? (
+                    workingMemory?.open_loops.map((item) => <span key={item} className="status-pill !rounded-2xl">{item}</span>)
+                  ) : (
+                    <span className="text-[var(--muted)]">暂无</span>
+                  )}
                 </div>
-                <span className="status-pill">{currentTurnRawMessages.length} events</span>
               </div>
-              {currentTurnRawMessages.map((item) => (
-                <DebugEventCard key={item.id} item={item} />
-              ))}
-            </section>
-          </>
-        ) : null}
-      </div>
-    </aside>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Recent Tools</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {(workingMemory?.recent_tools ?? []).length > 0 ? (
+                    workingMemory?.recent_tools.map((item) => <span key={item} className="status-pill">{item}</span>)
+                  ) : (
+                    <span className="text-[var(--muted)]">暂无</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">Artifacts</p>
+                <div className="mt-1 space-y-2">
+                  {(workingMemory?.artifacts ?? []).length > 0 ? (
+                    workingMemory?.artifacts.map((artifact) => (
+                      <ArtifactCard key={artifact.path} artifact={artifact} onPreviewCsv={openCsvPreview} />
+                    ))
+                  ) : (
+                    <span className="text-[var(--muted)]">暂无</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-3">
+            <div className="mb-2">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Retrieved Context</p>
+              <p className="text-sm text-[var(--foreground)]">每轮检索命中的上下文片段</p>
+            </div>
+            <div className="space-y-2.5">
+              {retrievedContext.length > 0 ? (
+                retrievedContext.map((item) => (
+                  <article key={`${item.source}-${item.title}`} className="rounded-2xl border border-[var(--line)] bg-[var(--background)] px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 text-[11px] text-[var(--muted)]">
+                      <span>{item.kind}</span>
+                      <span>{item.score.toFixed(2)}</span>
+                    </div>
+                    <p className="mt-1 text-[12px] font-medium text-[var(--foreground)]">{item.title}</p>
+                    <p className="mt-1 text-[11px] leading-5 text-[var(--muted)]">{item.snippet}</p>
+                  </article>
+                ))
+              ) : (
+                <p className="text-[13px] text-[var(--muted)]">暂无命中。</p>
+              )}
+            </div>
+          </section>
+
+          {debugOpen ? (
+            <>
+              <DebugTraceExplorer rawMessages={rawMessages} />
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Debug Feed</p>
+                    <p className="text-sm text-[var(--foreground)]">当前这一轮的原始事件流，按实际顺序保留。</p>
+                  </div>
+                  <span className="status-pill">{currentTurnRawMessages.length} events</span>
+                </div>
+                {currentTurnRawMessages.map((item) => (
+                  <DebugEventCard key={item.id} item={item} />
+                ))}
+              </section>
+            </>
+          ) : null}
+        </div>
+      </aside>
+
+      <CsvPreviewModal
+        artifact={previewArtifact}
+        error={csvPreviewError}
+        loading={csvPreviewLoading}
+        onClose={closeCsvPreview}
+        preview={csvPreview}
+      />
+    </Fragment>
   );
 }
 
@@ -3244,6 +3742,11 @@ export function Workspace({ page }: { page: WorkspacePage }) {
     () => (activeSession ? buildTimelineTurns(activeSession.raw_messages) : []),
     [activeSession],
   );
+  const historicalArtifactTurns = useMemo(
+    () => (activeSession ? buildArtifactTurns(activeSession.raw_messages) : []),
+    [activeSession],
+  );
+  const streamArtifactTurns = useMemo(() => buildArtifactTurns(streamRawMessages), [streamRawMessages]);
   const displayMessages = useMemo(() => {
     if (!activeSession) {
       return [];
@@ -3278,13 +3781,25 @@ export function Workspace({ page }: { page: WorkspacePage }) {
       buildTurnViews({
         messages: displayMessages,
         historicalTimelineTurns,
+        historicalArtifactTurns,
         streamSteps,
+        streamArtifactTurns,
         streamTurnState,
         activeTurnState,
         streaming,
         streamAssistant,
       }),
-    [activeTurnState, displayMessages, historicalTimelineTurns, streamAssistant, streamSteps, streamTurnState, streaming],
+    [
+      activeTurnState,
+      displayMessages,
+      historicalArtifactTurns,
+      historicalTimelineTurns,
+      streamArtifactTurns,
+      streamAssistant,
+      streamSteps,
+      streamTurnState,
+      streaming,
+    ],
   );
 
   function upsertSessionSummary(nextSession: SessionSummary | SessionRecord) {
@@ -4490,6 +5005,7 @@ export function Workspace({ page }: { page: WorkspacePage }) {
                         {assistantMessage ? (
                           <MessageBubble
                             message={assistantMessage}
+                            artifacts={turn.artifacts}
                             sessionId={activeSession?.id}
                             copied={copiedMessageId === assistantMessage.id}
                             onCopy={(value) => void copyMessage(assistantMessage.id, value)}
@@ -4555,6 +5071,7 @@ export function Workspace({ page }: { page: WorkspacePage }) {
 
             <DebugPanel open={debugOpen}>
               <SessionInsightPanel
+                key={activeSession?.id ?? "empty-session"}
                 session={activeSession}
                 turnState={activeTurnState}
                 rawMessages={displayRawMessages}

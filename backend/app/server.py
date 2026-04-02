@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import mimetypes
 import re
@@ -167,6 +168,40 @@ def _resolve_safe_sandbox_file_path(raw_path: str) -> Path:
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
     return candidate
+
+
+def _read_csv_preview(target: Path, *, limit: int) -> dict[str, Any]:
+    if target.suffix.lower() != ".csv":
+        raise HTTPException(status_code=400, detail="仅支持预览 CSV 文件")
+
+    rows: list[list[str]] = []
+    truncated = False
+    try:
+        with target.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            try:
+                columns = next(reader)
+            except StopIteration:
+                columns = []
+            for row in reader:
+                if len(rows) >= limit:
+                    truncated = True
+                    break
+                rows.append([str(cell) for cell in row])
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"CSV 文件编码不受支持：{target.name}") from exc
+    except csv.Error as exc:
+        raise HTTPException(status_code=400, detail=f"CSV 解析失败：{target.name}") from exc
+
+    return {
+        "path": str(target),
+        "name": target.name,
+        "columns": [str(column) for column in columns],
+        "rows": rows,
+        "column_count": len(columns),
+        "displayed_rows": len(rows),
+        "truncated": truncated,
+    }
 
 
 def _managed_skills_root() -> Path:
@@ -369,6 +404,14 @@ def create_app() -> FastAPI:
         target = _resolve_safe_sandbox_file_path(path)
         media_type, _ = mimetypes.guess_type(target.name)
         return FileResponse(target, media_type=media_type or "application/octet-stream")
+
+    @app.get("/api/sandbox/csv-preview")
+    async def get_sandbox_csv_preview(
+        path: str = Query(...),
+        limit: int = Query(50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        target = _resolve_safe_sandbox_file_path(path)
+        return _read_csv_preview(target, limit=limit)
 
     @app.get("/api/options")
     async def options() -> dict[str, Any]:

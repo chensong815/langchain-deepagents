@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,9 +60,18 @@ class DuckDBToolTests(unittest.TestCase):
         fake_connection = _FakeConnection(rows, columns)
         fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
 
-        with patch("app.tools._import_duckdb", return_value=fake_duckdb):
-            runner = DuckDBRunner(db_path=":memory:", sql_limit_rows=1)
-            ok, digest, preview, error = runner.execute("SELECT * FROM metrics", meta={})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_sandbox = SimpleNamespace(workspace_path=Path(temp_dir))
+            with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+                with patch("app.tools.get_current_session_sandbox", return_value=fake_sandbox):
+                    runner = DuckDBRunner(db_path=":memory:", sql_limit_rows=1)
+                    ok, digest, preview, error = runner.execute("SELECT * FROM metrics", meta={})
+
+                    self.assertTrue(Path(digest["result_file_path"]).exists())
+                    self.assertEqual(
+                        Path(digest["result_file_path"]).read_text(encoding="utf-8"),
+                        "order_date,amount\n2026-01-01,10\n2026-02-01,20\n",
+                    )
 
         self.assertTrue(ok)
         self.assertIsNone(error)
@@ -69,6 +79,9 @@ class DuckDBToolTests(unittest.TestCase):
         self.assertEqual(digest["preview_rows"], 1)
         self.assertEqual(digest["period"], ["2026-01-01", "2026-02-01"])
         self.assertAlmostEqual(digest["keyvals"]["mean"], 15.0)
+        self.assertEqual(digest["preview_records"], [{"order_date": "2026-01-01", "amount": 10}])
+        self.assertEqual(digest["summary_text"], "返回结果：共2行，2个字段，预览如下（仅展示前1行）：")
+        self.assertIn("| order_date | amount |", digest["preview_markdown"])
         self.assertIn("order_date,amount", preview or "")
         self.assertIn("等2行数据", preview or "")
 
@@ -78,18 +91,27 @@ class DuckDBToolTests(unittest.TestCase):
         fake_connection = _FakeConnection(rows, columns)
         fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
 
-        with patch("app.tools._import_duckdb", return_value=fake_duckdb):
-            raw = run_duckdb_sql.invoke(
-                {
-                    "db_path": ":memory:",
-                    "sql": "SELECT * FROM users",
-                    "max_rows": 10,
-                }
-            )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_sandbox = SimpleNamespace(workspace_path=Path(temp_dir))
+            with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+                with patch("app.tools.get_current_session_sandbox", return_value=fake_sandbox):
+                    raw = run_duckdb_sql.invoke(
+                        {
+                            "db_path": ":memory:",
+                            "sql": "SELECT * FROM users",
+                            "max_rows": 10,
+                        }
+                    )
 
-        payload = json.loads(raw)
+                    payload = json.loads(raw)
+                    self.assertTrue(Path(payload["file_path"]).exists())
+
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["digest"]["rows"], 1)
+        self.assertEqual(payload["summary_text"], "返回结果：共1行，2个字段，预览如下：")
+        self.assertEqual(payload["file_path"], payload["result_file_path"])
+        self.assertEqual(payload["preview_records"], [{"id": 1, "name": "alice"}])
+        self.assertIn("| id | name |", payload["preview_markdown"])
         self.assertIn("id,name", payload["preview"])
 
     def test_tool_uses_env_db_path_when_input_missing(self) -> None:
@@ -98,16 +120,21 @@ class DuckDBToolTests(unittest.TestCase):
         fake_connection = _FakeConnection(rows, columns)
         fake_duckdb = SimpleNamespace(connect=lambda **_: fake_connection)
 
-        with patch.dict(os.environ, {"DB_PATH": ":memory:"}, clear=False):
-            with patch("app.tools._import_duckdb", return_value=fake_duckdb):
-                raw = run_duckdb_sql.invoke(
-                    {
-                        "sql": "SELECT 1",
-                        "max_rows": 10,
-                    }
-                )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_sandbox = SimpleNamespace(workspace_path=Path(temp_dir))
+            with patch.dict(os.environ, {"DB_PATH": ":memory:"}, clear=False):
+                with patch("app.tools._import_duckdb", return_value=fake_duckdb):
+                    with patch("app.tools.get_current_session_sandbox", return_value=fake_sandbox):
+                        raw = run_duckdb_sql.invoke(
+                            {
+                                "sql": "SELECT 1",
+                                "max_rows": 10,
+                            }
+                        )
 
-        payload = json.loads(raw)
+                        payload = json.loads(raw)
+                        self.assertTrue(Path(payload["file_path"]).exists())
+
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["resolved_db_path"], ":memory:")
 
